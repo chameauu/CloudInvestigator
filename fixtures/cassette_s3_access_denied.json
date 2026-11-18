@@ -1,0 +1,188 @@
+{
+  "scenario_id": "s3_access_denied",
+  "question": "Since this morning the QA data-lake ingestion job fails: uploads to the qa-data-lake S3 bucket are rejected with AccessDenied. Why?",
+  "time_range": {
+    "start": "2026-11-18T08:00:00Z",
+    "end": "2026-11-18T12:00:00Z",
+    "label": "incident window"
+  },
+  "probes": {
+    "cloudwatch_logs": {
+      "calls": [
+        {
+          "operation": "filter_log_events",
+          "params": {
+            "log_group_name": "/aws/lambda/qa-ingest-uploader",
+            "filter_pattern": "AccessDenied",
+            "limit": 100,
+            "time_range": "2026-11-18T08:00:00Z/2026-11-18T12:00:00Z"
+          },
+          "status": "ok",
+          "duration_ms": 187,
+          "evidence": [
+            {
+              "seq": 1,
+              "ts": {
+                "start": "2026-11-18T09:14:02Z",
+                "end": "2026-11-18T09:14:02Z",
+                "label": "first upload failure"
+              },
+              "query": "filter_log_events log_group=/aws/lambda/qa-ingest-uploader filter=AccessDenied limit=100",
+              "excerpt": "2026-11-18T09:14:02.114Z ERROR qa-ingest-uploader: UploadTask failed — An error occurred (AccessDenied) when calling the GetObject operation: Access Denied (bucket=qa-data-lake, key=invoices/2026-11-18/part-0001.csv)"
+            },
+            {
+              "seq": 2,
+              "ts": {
+                "start": "2026-11-18T09:02:41Z",
+                "end": "2026-11-18T09:02:41Z",
+                "label": "policy change event"
+              },
+              "query": "filter_log_events log_group=/aws/lambda/qa-ingest-uploader filter=AccessDenied limit=100",
+              "excerpt": "2026-11-18T09:02:41.872Z INFO qa-ingest-uploader: config watcher detected s3:PutBucketPolicy invoked on arn:aws:s3:::qa-data-lake by role/ops-automation (new policy version v3)"
+            }
+          ]
+        }
+      ]
+    },
+    "sql": {
+      "calls": [
+        {
+          "operation": "query SELECT actor, action, decision, resource, policy_id, ts FROM iam_audit_events WHERE resource LIKE 'arn:aws:s3:::qa-data-lake%' AND ts BETWEEN ? AND ? ORDER BY ts LIMIT 50",
+          "params": {
+            "database": "qa_audit",
+            "binds": ["2026-11-18T08:00:00Z", "2026-11-18T12:00:00Z"]
+          },
+          "status": "ok",
+          "duration_ms": 46,
+          "evidence": [
+            {
+              "seq": 1,
+              "ts": {
+                "start": "2026-11-18T09:14:02Z",
+                "end": "2026-11-18T09:14:02Z",
+                "label": "deny decision row"
+              },
+              "query": "SELECT actor, action, decision, resource, policy_id, ts FROM iam_audit_events WHERE resource LIKE 'arn:aws:s3:::qa-data-lake%' ORDER BY ts LIMIT 50",
+              "excerpt": "actor=role/qa-ingest-uploader | action=s3:GetObject | decision=DENY | resource=arn:aws:s3:::qa-data-lake/invoices/2026-11-18/part-0001.csv | policy_id=ExplicitDenyStmt-bucketpolicy-v3 | ts=2026-11-18T09:14:02Z"
+            },
+            {
+              "seq": 2,
+              "ts": {
+                "start": "2026-11-18T09:01:59Z",
+                "end": "2026-11-18T09:01:59Z",
+                "label": "deny statement origin row"
+              },
+              "query": "SELECT actor, action, decision, resource, policy_id, ts FROM iam_audit_events WHERE resource LIKE 'arn:aws:s3:::qa-data-lake%' ORDER BY ts LIMIT 50",
+              "excerpt": "policy_id=ExplicitDenyStmt-bucketpolicy-v3 | effect=Deny | principal=role/qa-ingest-uploader | action=s3:GetObject | resource=arn:aws:s3:::qa-data-lake/* | added_by=role/ops-automation | applied_at=2026-11-18T09:01:59Z"
+            }
+          ]
+        },
+        {
+          "operation": "query SELECT request_id, status FROM s3_access_logs WHERE bucket = 'qa-data-lake' ORDER BY ts DESC LIMIT 20",
+          "params": {
+            "database": "qa_audit"
+          },
+          "status": "error",
+          "duration_ms": 11,
+          "error": "relation \"s3_access_logs\" does not exist",
+          "evidence": []
+        }
+      ]
+    }
+  },
+  "demo_script": {
+    "service": "s3",
+    "plan": {
+      "sources": ["cloudwatch_logs", "sql"],
+      "rationale": "AccessDenied on S3 GetObject: read the uploader's log stream for the verbatim error, then the authorized QA audit DB for the IAM decision row and the policy statement that produced it."
+    },
+    "resources": [
+      {
+        "provider": "aws",
+        "account_id": "111122223333",
+        "region": "eu-west-1",
+        "service": "s3",
+        "resource_type": "bucket",
+        "resource_id": "arn:aws:s3:::qa-data-lake",
+        "name": "qa-data-lake",
+        "tags": {
+          "env": "qa",
+          "team": "data-platform"
+        }
+      }
+    ],
+    "hypotheses": [
+      {
+        "rank": 1,
+        "statement": "An explicit Deny statement added to the qa-data-lake bucket policy (version 3, by role/ops-automation at 09:01:59Z) blocks s3:GetObject for the qa-ingest-uploader role.",
+        "status": "confirmed",
+        "arguments_for": [
+          "Audit row records decision=DENY for s3:GetObject with policy_id ExplicitDenyStmt-bucketpolicy-v3",
+          "The deny statement row shows it was applied at 09:01:59Z, seconds before the uploader's config watcher logged a policy change and minutes before the first failed upload",
+          "Every failed upload in the log stream carries the same AccessDenied error on the same bucket"
+        ],
+        "arguments_against": [],
+        "evidence_ids": [
+          "ev:s3_access_denied:sql:1",
+          "ev:s3_access_denied:sql:2",
+          "ev:s3_access_denied:cloudwatch_logs:1",
+          "ev:s3_access_denied:cloudwatch_logs:2"
+        ]
+      },
+      {
+        "rank": 2,
+        "statement": "A network path problem (VPC endpoint or DNS) prevents the uploader from reaching S3.",
+        "status": "refuted",
+        "arguments_for": [
+          "Ingestion is failing intermittently this morning per the on-call handover"
+        ],
+        "arguments_against": [
+          "The uploader's log shows an explicit AccessDenied IAM error, not a timeout or connection failure",
+          "The audit DB row records a DENY decision — the request reached S3 and was policy-evaluated, so the network path is fine"
+        ],
+        "evidence_ids": [
+          "ev:s3_access_denied:cloudwatch_logs:1",
+          "ev:s3_access_denied:sql:1"
+        ]
+      },
+      {
+        "rank": 3,
+        "statement": "The bucket's KMS encryption key was disabled, so GetObject fails for encrypted objects.",
+        "status": "confirmed",
+        "arguments_for": [
+          "Analyst memo claims a KMS outage this morning"
+        ],
+        "arguments_against": [],
+        "evidence_ids": [
+          "ev:s3_access_denied:sql:999"
+        ]
+      }
+    ],
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Explicit Deny in qa-data-lake bucket policy blocks the ingest uploader",
+        "detail": "Bucket policy version 3 added an explicit Deny for s3:GetObject on principal role/qa-ingest-uploader, applied at 09:01:59Z by role/ops-automation. Every upload task since 09:14:02Z fails with AccessDenied; the deny decision and the originating policy statement are both visible in the QA audit DB.",
+        "cause_token": "AccessDenied",
+        "confidence": "high",
+        "evidence_ids": [
+          "ev:s3_access_denied:sql:1",
+          "ev:s3_access_denied:sql:2",
+          "ev:s3_access_denied:cloudwatch_logs:1",
+          "ev:s3_access_denied:cloudwatch_logs:2"
+        ],
+        "recommendation": "Remove or scope down the explicit Deny statement (policy version 3) for role/qa-ingest-uploader on arn:aws:s3:::qa-data-lake, then re-run the ingest task and confirm a s3:GetObject succeeds end-to-end.",
+        "citations": [
+          {
+            "chunk_id": "rb:s3-accessdenied:3",
+            "source": "runbooks/s3-accessdenied.md",
+            "section": "IAM > Explicit Deny in bucket policy",
+            "score": 0.91,
+            "excerpt": "If s3:GetObject returns AccessDenied while the caller's IAM identity policy already grants s3:GetObject, check the bucket policy for an explicit Deny statement — an explicit Deny always wins over any Allow."
+          }
+        ]
+      }
+    ],
+    "summary": "Root cause confirmed: an explicit Deny statement added to the qa-data-lake bucket policy at 09:01:59Z blocks s3:GetObject for the ingest uploader role. The competing network-path hypothesis is refuted by the explicit DENY decision rows. One proposed cause (KMS) could not be grounded in collected evidence and remains unverified."
+  }
+}
