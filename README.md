@@ -20,6 +20,13 @@ Then open <http://127.0.0.1:8000/>: submit the natural-language problem, watch
 the investigation stream node-by-node, and read the final report. The demo
 replays deterministic cassettes in `fixtures/` (S3 access-denied scenario).
 
+Each run resolves the service against `catalog.yaml` to decide which resources
+are in scope and where to look, probes the sources that are actually
+registered, then ranks at least two competing explanations — showing each one
+confirmed or eliminated as the evidence arrives. Recommendations carry the
+culprit version when the evidence names one, an explicit rollback path, and
+the steps that prove recovery.
+
 ## Local stack
 
 ```bash
