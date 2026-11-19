@@ -1,7 +1,13 @@
 """Investigation graph — compiled exactly per the plan pinned in state.py.
 
     START → intake → plan → gate → Send(probe_source × N) → correlate
-          → hypothesize → verify → report → END
+          → hypothesize → eliminate → verify → report → END
+
+`gate` is the typed `resolve_integrations` stage: the service catalog plus the
+probe registry decide which sources are usable (unavailable ones reported with
+a reason). `hypothesize` runs the diagnose stage (≥2 competing candidates with
+a deterministic fallback); `eliminate` replays evidence arrival and records
+which hypotheses die, so the SSE stream can show it.
 
 Node rules that keep the Send() fan-out safe (the Executor's predicted risk —
 reducer collisions on parallel branches — is avoided BY CONSTRUCTION here):
@@ -23,12 +29,18 @@ reducer collisions on parallel branches — is avoided BY CONSTRUCTION here):
 
 from __future__ import annotations
 
+from functools import lru_cache
+from pathlib import Path
+
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
+from ..catalog import Catalog, CatalogError, load_catalog
+from ..config import ConfigError, load_settings
 from ..contracts import (
     CoverageReport,
+    EvidenceItem,
     Finding,
     Hypothesis,
     InvestigationReport,
@@ -40,9 +52,59 @@ from ..llm.fake import FakeLLM
 from ..sources.base import ProbeContext
 from ..sources.fake import load_cassette
 from ..sources.probes import make_probe, registered_probes
+from .diagnose import Diagnoser, DiagnoseResult, RootCauseCandidate, diagnose, to_hypotheses
+from .elimination import eliminate as eliminate_candidates
+from .recommend import build_plans, render
+from .resolve import IntegrationResolution, resolve_integrations
 from .state import InvestigationState, ProbeBranch
 
 DEFAULT_SCENARIO = "s3_access_denied"
+
+
+class CassetteDiagnoser:
+    """Cassette stand-in for the analyst model.
+
+    The script's *statuses* are not trusted: a "confirmed" hypothesis becomes a
+    candidate with supporting ids, a "refuted" one with contradicting ids, and
+    elimination decides the final status from evidence arrival. Unverified
+    hypotheses with no resolvable ids stay unverified — that is the demo's
+    honest third candidate.
+    """
+
+    def __init__(self, demo_script: dict) -> None:
+        self._script = demo_script or {}
+
+    def diagnose(
+        self, question: str, evidence: list[EvidenceItem], findings: list[Finding]
+    ) -> list[RootCauseCandidate]:
+        candidates: list[RootCauseCandidate] = []
+        for item in self._script.get("hypotheses", []):
+            status = item.get("status", "unverified")
+            ids = list(item.get("evidence_ids", []))
+            candidates.append(
+                RootCauseCandidate(
+                    statement=item.get("statement", ""),
+                    status="unverified",
+                    supporting_ids=ids if status == "confirmed" else [],
+                    contradicting_ids=ids if status == "refuted" else [],
+                    required_next_evidence=list(item.get("arguments_against", []))[:2],
+                    reasoning=" ".join(item.get("arguments_for", []))[:300],
+                )
+            )
+        return candidates
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+@lru_cache(maxsize=4)
+def _catalog(path: str) -> Catalog:
+    """Load the service catalog once per path (relative paths resolve at repo root)."""
+    candidate = Path(path)
+    if not candidate.is_absolute() and not candidate.exists():
+        candidate = _repo_root() / path
+    return load_catalog(candidate)
 
 
 # --------------------------------------------------------------------- nodes
@@ -85,44 +147,66 @@ def plan(state: InvestigationState) -> dict:
 
 
 def gate(state: InvestigationState) -> dict:
-    """Which planned sources are actually connected here. Unavailable sources
-    are reported (skipped), never silently dropped; no usable source → abstain."""
-    known = registered_probes()
+    """resolve_integrations: catalog + registry decide what is probeable here.
+
+    Unavailable sources are reported (skipped) with a reason, never silently
+    dropped; no usable source → abstain. A broken catalog abstains loudly
+    instead of probing blind.
+    """
     planned = list(state["plan"].sources) if state.get("plan") else []
-    skipped = [s for s in planned if s not in known]
 
-    abstain_reason = ""
-    if not planned:
-        abstain_reason = "no sources planned for this problem"
-    elif len(skipped) == len(planned):
-        abstain_reason = "none of the planned sources are connected: " + ", ".join(planned)
+    try:
+        settings = load_settings()
+        catalog = _catalog(settings.catalog_path)
+    except (CatalogError, ConfigError) as exc:
+        return {
+            "integration": None,
+            "coverage": {
+                "sources_planned": planned,
+                "skipped": [],
+                "failures": [f"catalog: {exc}"],
+            },
+            "abstain_reason": f"service catalog unavailable: {exc}",
+        }
 
-    # coverage is a plain dict channel: single-branch writers only, and each
-    # one merges what previous nodes put there.
+    resolution = resolve_integrations(
+        service=state.get("service", ""),
+        planned_sources=planned,
+        catalog=catalog,
+        available_sources=registered_probes(),
+    )
+    coverage = {
+        "sources_planned": planned,
+        "skipped": [u.name for u in resolution.unavailable],
+    }
     return {
-        "coverage": {"sources_planned": planned, "skipped": skipped},
-        "abstain_reason": abstain_reason,
+        "integration": resolution.model_dump(),
+        "coverage": coverage,
+        "abstain_reason": resolution.abstain_reason,
     }
 
 
 def route_from_gate(state: InvestigationState):
-    """Conditional edge: one Send() branch per planned source, or bail to report."""
+    """Conditional edge: one Send() branch per resolved source, or bail to report."""
     if state.get("abstain_reason"):
         return "report"
+    raw = state.get("integration") or {}
+    resolution = IntegrationResolution(**raw)
     plan: ProbePlan = state["plan"]
     return [
         Send(
             "probe_source",
             {
                 "investigation_id": state.get("investigation_id", ""),
-                "source": source,
+                "source": resolved.name,
                 "time_range": plan.time_range,
-                "resource_targets": plan.resource_targets,
+                "resource_targets": resolved.resources or plan.resource_targets,
+                "params": resolved.params,
                 "scenario": state.get("scenario", ""),
                 "demo_mode": bool(state.get("demo_mode", False)),
             },
         )
-        for source in plan.sources
+        for resolved in resolution.available
     ]
 
 
@@ -135,6 +219,7 @@ def probe_source(branch: ProbeBranch) -> dict:
         kind=branch["source"],  # spike: adapter names are SourceKind literals
         time_range=branch.get("time_range"),
         resource_targets=branch.get("resource_targets") or [],
+        params=branch.get("params") or {},
         scenario=branch.get("scenario", ""),
         demo_mode=bool(branch.get("demo_mode", False)),
     )
@@ -185,9 +270,51 @@ def correlate(state: InvestigationState) -> dict:
 
 
 def hypothesize(state: InvestigationState) -> dict:
-    """FakeLLM proposes competing ranked causes + candidate findings."""
-    llm = FakeLLM(state.get("demo_script") or {})
-    return {"hypotheses": llm.hypotheses(), "findings": llm.findings()}
+    """Diagnose: ≥2 competing candidates, validated; deterministic fallback if
+    the analyser fails or under-delivers. Findings stay the model's narrative
+    (verify decides which survive)."""
+    script = state.get("demo_script") or {}
+    llm = FakeLLM(script)
+    findings = llm.findings()
+    diagnoser: Diagnoser | None = CassetteDiagnoser(script) if script.get("hypotheses") else None
+    result = diagnose(
+        state.get("question", ""),
+        list(state.get("evidence") or []),
+        findings,
+        diagnoser=diagnoser,
+    )
+    return {
+        "candidates": result.candidates,
+        "hypotheses": to_hypotheses(result),
+        "findings": findings,
+        "diagnose_meta": {
+            "used_fallback": result.used_fallback,
+            "rejected_ids": result.rejected_ids,
+            "notes": result.notes,
+        },
+    }
+
+
+def eliminate_hypotheses(state: InvestigationState) -> dict:
+    """Replay evidence arrival: candidates get refuted or confirmed by code.
+
+    The events are the SSE story ("this hypothesis just died because …");
+    the hypotheses list is rebuilt so verify/report consume the final statuses.
+    """
+    candidates = list(state.get("candidates") or [])
+    final, events = eliminate_candidates(candidates, list(state.get("evidence") or []))
+    meta = dict(state.get("diagnose_meta") or {})
+    result = DiagnoseResult(
+        candidates=final,
+        used_fallback=bool(meta.get("used_fallback", False)),
+        rejected_ids=list(meta.get("rejected_ids") or []),
+        notes=list(meta.get("notes") or []),
+    )
+    return {
+        "candidates": final,
+        "hypotheses": to_hypotheses(result),
+        "eliminations": events,
+    }
 
 
 def verify(state: InvestigationState) -> dict:
@@ -209,10 +336,27 @@ def verify(state: InvestigationState) -> dict:
 
     retried = False
     if any(invalid(c) for c in (*hypotheses, *findings)):
-        # Reject-and-retry ONCE. FakeLLM is deterministic: the retry returns
-        # the same poisoned claims, so demotion below is what saves us. A real
-        # LLM node would receive the validation error with its second prompt.
-        hypotheses, findings = llm.hypotheses(), llm.findings()
+        # Reject-and-retry ONCE: re-run the diagnose stage. The cassette analyser
+        # is deterministic, so the retry returns the same poisoned claims — the
+        # demotion below is what saves us. A real model would get the validation
+        # error with its second prompt.
+        retry = diagnose(
+            state.get("question", ""),
+            list(state.get("evidence") or []),
+            llm.findings(),
+            diagnoser=(
+                CassetteDiagnoser(state.get("demo_script") or {})
+                if (state.get("demo_script") or {}).get("hypotheses")
+                else None
+            ),
+        )
+        retried_candidates, _ = eliminate_candidates(
+            retry.candidates, list(state.get("evidence") or [])
+        )
+        hypotheses = to_hypotheses(
+            DiagnoseResult(candidates=retried_candidates, used_fallback=retry.used_fallback)
+        )
+        findings = llm.findings()
         retried = True
 
     kept_findings: list[Finding] = []
@@ -322,7 +466,7 @@ def report(state: InvestigationState) -> dict:
         timeline=timeline,
         hypotheses=hypotheses,
         findings=findings,
-        recommendations=[f.recommendation for f in findings if f.recommendation],
+        recommendations=_recommendations(findings, evidence),
         evidence=evidence,
         citations=list(citations.values()),
         coverage=coverage,
@@ -331,6 +475,14 @@ def report(state: InvestigationState) -> dict:
         confidence=confidence,
     )
     return {"report": inv}
+
+
+def _recommendations(findings: list[Finding], evidence: list[EvidenceItem]) -> list[str]:
+    """Culprit-version / rollback / verification plans, rendered to the contract."""
+    plans = build_plans(findings, evidence)
+    if plans:
+        return [render(plan) for plan in plans]
+    return [f.recommendation for f in findings if f.recommendation]
 
 
 # ------------------------------------------------------------------ compile
@@ -356,6 +508,7 @@ def build_graph(
     graph.add_node("probe_source", probe_source)
     graph.add_node("correlate", correlate)
     graph.add_node("hypothesize", hypothesize)
+    graph.add_node("eliminate", eliminate_hypotheses)
     graph.add_node("verify", verify)
     graph.add_node("report", report)
 
@@ -365,7 +518,8 @@ def build_graph(
     graph.add_conditional_edges("gate", route_from_gate, ["probe_source", "report"])
     graph.add_edge("probe_source", "correlate")
     graph.add_edge("correlate", "hypothesize")
-    graph.add_edge("hypothesize", "verify")
+    graph.add_edge("hypothesize", "eliminate")
+    graph.add_edge("eliminate", "verify")
     graph.add_edge("verify", "report")
     graph.add_edge("report", END)
     return graph.compile(checkpointer=checkpointer, interrupt_before=interrupt_before)
@@ -478,7 +632,18 @@ def _short_payload(update: dict) -> dict:
     """SSE progress payload: node name + short values — never the full report."""
     out: dict = {}
     for key, value in (update or {}).items():
-        if isinstance(value, list):
+        if key == "eliminations" and isinstance(value, list):
+            out[key] = [
+                {
+                    "rank": event.candidate_rank,
+                    "statement": event.statement[:80],
+                    "to_status": event.to_status,
+                    "seq": event.seq,
+                    "reason": event.reason[:120],
+                }
+                for event in value
+            ]
+        elif isinstance(value, list):
             out[key] = f"{len(value)} item(s)"
         elif isinstance(value, str):
             out[key] = value[:100]

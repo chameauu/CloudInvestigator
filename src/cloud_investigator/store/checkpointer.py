@@ -14,6 +14,8 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from .. import contracts
 from ..config import load_settings
+from ..engine.diagnose import RootCauseCandidate
+from ..engine.elimination import EliminationEvent
 
 #: The pinned contract models are the only custom types that ever enter graph
 #: state — register them so checkpoint (de)serialization is explicit instead
@@ -31,6 +33,8 @@ ALLOWED_MSGPACK_TYPES = (
     contracts.CoverageReport,
     contracts.InvestigationReport,
     contracts.ProbePlan,
+    RootCauseCandidate,
+    EliminationEvent,
 )
 
 #: Entered ``from_conn_string`` contexts, keyed by the saver they yielded.

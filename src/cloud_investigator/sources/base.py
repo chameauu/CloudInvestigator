@@ -97,6 +97,7 @@ class ProbeContext(BaseModel):
     kind: SourceKind
     time_range: TimeRange | None = None
     resource_targets: list[ResourceRef] = Field(default_factory=list)
+    params: dict = Field(default_factory=dict)  # catalog binding (log groups, DBs, …)
     scenario: str = ""  # fixture scenario_id when demo_mode
     demo_mode: bool = False
 

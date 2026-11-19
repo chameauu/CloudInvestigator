@@ -7,10 +7,15 @@ FAIL with instructions — they never skip silently.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from cloud_investigator.catalog import load_catalog
+from cloud_investigator.config import load_settings
 from cloud_investigator.contracts import InvestigationReport, ResourceRef, TimeRange
 from cloud_investigator.engine.graph import DEFAULT_SCENARIO, run_investigation
+from cloud_investigator.engine.resolve import resolve_integrations
 from cloud_investigator.sources.base import ProbeContext
 from cloud_investigator.sources.fake import load_cassette
 from cloud_investigator.sources.probes import make_probe, registered_probes
@@ -76,19 +81,30 @@ def _scenario_fixtures() -> tuple[dict, TimeRange, list[ResourceRef]]:
 def _probe_branches(
     time_range: TimeRange, resources: list[ResourceRef]
 ) -> list[tuple[str, object]]:
-    """One ProbeResult per registered source — exactly what probe_source emits."""
+    """One ProbeResult per resolved source — exactly what probe_source emits."""
+    settings = load_settings()
+    catalog_path = Path(settings.catalog_path)
+    if not catalog_path.is_absolute() and not catalog_path.exists():
+        catalog_path = Path(__file__).resolve().parents[2] / settings.catalog_path
+    resolution = resolve_integrations(
+        service="s3",
+        planned_sources=["cloudwatch_logs", "sql"],
+        catalog=load_catalog(catalog_path),
+        available_sources=registered_probes(),
+    )
     branches = []
-    for source in registered_probes():
+    for resolved in resolution.available:
         ctx = ProbeContext(
             investigation_id=f"inv:{DEFAULT_SCENARIO}",
-            source=source,
-            kind=source,
+            source=resolved.name,
+            kind=resolved.kind,
             time_range=time_range,
-            resource_targets=resources,
+            resource_targets=resolved.resources or resources,
+            params=resolved.params,
             scenario=DEFAULT_SCENARIO,
             demo_mode=True,
         )
-        branches.append((source, make_probe(ctx).probe(ctx)))
+        branches.append((resolved.name, make_probe(ctx).probe(ctx)))
     return branches
 
 

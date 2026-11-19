@@ -2,7 +2,7 @@
 
 Graph shape (docs/inspiration-and-blueprint.md §4):
   START → intake → plan → gate → Send(probe_source × N) → correlate
-        → hypothesize → verify → report → END
+        → hypothesize → eliminate → verify → report → END
 
 The probe fan-out follows the LangGraph map-reduce pattern (one branch per
 planned source); joins are implicit via list reducers on the shared state.
@@ -23,6 +23,8 @@ from ..contracts import (
     TimelineEvent,
     TimeRange,
 )
+from .diagnose import RootCauseCandidate
+from .elimination import EliminationEvent
 
 
 def merge_list(left: list | None, right: list | None) -> list:
@@ -44,6 +46,7 @@ class InvestigationState(TypedDict, total=False):
 
     # planning
     plan: ProbePlan | None
+    integration: dict  # IntegrationResolution dump from the gate (resolve stage)
 
     # accumulated by probe branches (reducers)
     evidence: Annotated[list[EvidenceItem], merge_list]
@@ -52,6 +55,9 @@ class InvestigationState(TypedDict, total=False):
     citations: Annotated[list[Citation], merge_list]
 
     # analysis
+    candidates: list[RootCauseCandidate]
+    eliminations: list[EliminationEvent]
+    diagnose_meta: dict
     hypotheses: list[Hypothesis]
     findings: list[Finding]
 
@@ -68,5 +74,6 @@ class ProbeBranch(TypedDict, total=False):
     source: str  # source adapter name
     time_range: TimeRange | None
     resource_targets: list[ResourceRef]
+    params: dict  # catalog binding params (log groups, databases, …)
     scenario: str  # fixture scenario_id when demo_mode
     demo_mode: bool
