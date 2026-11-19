@@ -5,7 +5,7 @@
 > `PLAN.md` defines what we are building and in what order. `PROGRESS.md` records where we
 > are. `notes/` holds the evidence. This file defines how we work.
 >
-> **Status:** Phase 0 (offline end-to-end spike) — PASS; exit gate met (evidence in `notes/0002-phase-0-spike.md`). Phase 1 awaiting user go-ahead.
+> **Status:** Phase 1 (foundations) — complete on the local stack (commit `440f9d9`): Postgres ledger + checkpointer, runbook RAG, probe layer, CI + pre-commit. Phase 2 awaits the user's go-ahead.
 
 ---
 
