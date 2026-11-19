@@ -21,7 +21,7 @@ services:
       cloudwatch_logs:
         log_groups:
           - "/aws/lambda/qa-ingest-uploader"
-        filter_pattern: "AccessDenied"
+        filter_pattern: "qa-data-lake"
       sql:
         databases:
           - "qa_audit"
