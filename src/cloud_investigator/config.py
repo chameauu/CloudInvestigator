@@ -27,6 +27,7 @@ class Settings:
     demo_mode: bool = True
     environment: str = "dev"
     runbook_dir: str = "runbooks"
+    catalog_path: str = "catalog.yaml"
     max_evidence_per_probe: int = 40
     sql_statement_timeout_ms: int = 5000
     sql_default_limit: int = 100
@@ -69,6 +70,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         demo_mode=_bool(source, "DEMO_MODE", True),
         environment=source.get("ENVIRONMENT", "dev") or "dev",
         runbook_dir=source.get("RUNBOOK_DIR", "runbooks") or "runbooks",
+        catalog_path=source.get("CATALOG_PATH", "catalog.yaml") or "catalog.yaml",
         max_evidence_per_probe=_int(source, "MAX_EVIDENCE_PER_PROBE", 40),
         sql_statement_timeout_ms=_int(source, "SQL_STATEMENT_TIMEOUT_MS", 5000),
         sql_default_limit=_int(source, "SQL_DEFAULT_LIMIT", 100),

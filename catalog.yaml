@@ -1,0 +1,131 @@
+# Service catalog — the deterministic map from a service to its resources.
+#
+# The agent resolves WHICH resources belong to the reported service here; it
+# never invents resource names from the question. Bindings below also carry the
+# probe scope (log groups, filter patterns, authorized databases) so a probe
+# gets the same window/target every run.
+#
+# Read-only by design: this file describes where to LOOK, never what to change.
+
+version: 1
+environment: dev
+
+services:
+  s3:
+    display_name: "QA data-lake ingestion (S3)"
+    description: >
+      Nightly invoice ingestion writing to the qa-data-lake bucket from the
+      qa-ingest-uploader Lambda. Audit trail of IAM decisions lives in the
+      qa_audit database.
+    sources:
+      cloudwatch_logs:
+        log_groups:
+          - "/aws/lambda/qa-ingest-uploader"
+        filter_pattern: "AccessDenied"
+      sql:
+        databases:
+          - "qa_audit"
+    resources:
+      - provider: aws
+        region: eu-west-1
+        service: s3
+        resource_type: bucket
+        resource_id: "arn:aws:s3:::qa-data-lake"
+        name: qa-data-lake
+        tags: {env: qa, owner: data-platform, tier: data}
+      - provider: aws
+        region: eu-west-1
+        service: lambda
+        resource_type: function
+        resource_id: "arn:aws:lambda:eu-west-1:123456789012:function:qa-ingest-uploader"
+        name: qa-ingest-uploader
+        tags: {env: qa, owner: data-platform}
+      - provider: aws
+        region: eu-west-1
+        service: iam
+        resource_type: role
+        resource_id: "arn:aws:iam::123456789012:role/qa-ingest-uploader"
+        name: role/qa-ingest-uploader
+        tags: {env: qa}
+    runbooks:
+      - s3-access-denied.md
+
+  rds-orders:
+    display_name: "Orders API database (RDS Postgres)"
+    description: >
+      Primary Postgres instance behind the orders API. Connection exhaustion
+      shows up as FATAL: sorry, too many clients already in application logs.
+    sources:
+      cloudwatch_logs:
+        log_groups:
+          - "/aws/rds/instance/orders-db/postgresql"
+        filter_pattern: "FATAL"
+      sql:
+        databases:
+          - "orders"
+    resources:
+      - provider: aws
+        region: eu-west-1
+        service: rds
+        resource_type: db_instance
+        resource_id: "arn:aws:rds:eu-west-1:123456789012:db:orders-db"
+        name: orders-db
+        tags: {env: qa, owner: orders-team, tier: data}
+      - provider: aws
+        region: eu-west-1
+        service: ecs
+        resource_type: service
+        resource_id: "arn:aws:ecs:eu-west-1:123456789012:service/orders-api/api"
+        name: orders-api
+        tags: {env: qa, owner: orders-team}
+    runbooks:
+      - rds-connection-exhaustion.md
+
+  public-api:
+    display_name: "Public API (ALB → ECS service)"
+    description: >
+      Internet-facing ALB in front of the api ECS service. 5xx spikes usually
+      trace back to unhealthy targets or a bad task definition revision.
+    sources:
+      cloudwatch_logs:
+        log_groups:
+          - "/aws/ecs/public-api"
+        filter_pattern: "ERROR"
+    resources:
+      - provider: aws
+        region: eu-west-1
+        service: alb
+        resource_type: load_balancer
+        resource_id: "arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/app/public-api/abc123"
+        name: public-api
+        tags: {env: qa, owner: platform, tier: edge}
+      - provider: aws
+        region: eu-west-1
+        service: ecs
+        resource_type: service
+        resource_id: "arn:aws:ecs:eu-west-1:123456789012:service/public-api/api"
+        name: api
+        tags: {env: qa, owner: platform}
+    runbooks:
+      - alb-5xx-target-health.md
+
+  batch-worker:
+    display_name: "Nightly batch worker (ECS task)"
+    description: >
+      Memory-hungry export worker. OOMKilled tasks disappear from the service
+      event stream and restart without an application-level error.
+    sources:
+      cloudwatch_logs:
+        log_groups:
+          - "/aws/ecs/batch-worker"
+        filter_pattern: "Killed"
+    resources:
+      - provider: aws
+        region: eu-west-1
+        service: ecs
+        resource_type: task_definition
+        resource_id: "arn:aws:ecs:eu-west-1:123456789012:task-definition/batch-worker:42"
+        name: batch-worker:42
+        tags: {env: qa, owner: data-platform, tier: batch}
+    runbooks:
+      - ecs-task-oom.md
