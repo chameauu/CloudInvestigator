@@ -5,7 +5,7 @@
 > `PLAN.md` defines what we are building and in what order. `PROGRESS.md` records where we
 > are. `notes/` holds the evidence. This file defines how we work.
 >
-> **Status:** Phase 3 (eval harness) — complete: six golden scenarios replay offline, scored for component, fault class, citation validity, abstention and forbidden claims, with replay determinism asserted in `make verify` and CI. Phase 4 (demo) awaits the user's go-ahead.
+> **Status:** Phase 4 (demo) — complete: terminal click-through (`make demo`), presenter script and scoreboard in `docs/demo.md`, complete attribution, and a clean-checkout gate verified without cloud credentials or API keys. The project is delivered end-to-end.
 
 ---
 

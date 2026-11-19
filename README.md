@@ -29,7 +29,8 @@ are in scope and where to look, probes the sources that are actually
 registered, then ranks at least two competing explanations — showing each one
 confirmed or eliminated as the evidence arrives. Recommendations carry the
 culprit version when the evidence names one, an explicit rollback path, and
-the steps that prove recovery.
+the steps that prove recovery. A presenter-ready walkthrough is in
+[`docs/demo.md`](docs/demo.md).
 
 ## Local stack
 
