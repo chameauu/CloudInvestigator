@@ -5,7 +5,7 @@
 > `PLAN.md` defines what we are building and in what order. `PROGRESS.md` records where we
 > are. `notes/` holds the evidence. This file defines how we work.
 >
-> **Status:** Phase 2 (investigation graph) — complete on the local stack: typed service catalog, `resolve_integrations` gate, competing-candidate diagnosis with deterministic fallback, evidence-arrival elimination, culprit-version/rollback recommendations. Phase 3 awaits the user's go-ahead.
+> **Status:** Phase 3 (eval harness) — complete: six golden scenarios replay offline, scored for component, fault class, citation validity, abstention and forbidden claims, with replay determinism asserted in `make verify` and CI. Phase 4 (demo) awaits the user's go-ahead.
 
 ---
 
