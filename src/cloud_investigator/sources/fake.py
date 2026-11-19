@@ -30,3 +30,10 @@ def load_cassette(scenario: str) -> dict:
     path = _fixtures_dir() / f"cassette_{scenario}.json"
     with path.open(encoding="utf-8") as fh:
         return json.load(fh)
+
+
+def available_scenarios() -> tuple[str, ...]:
+    """Scenario names that have a recorded cassette, sorted."""
+    files = _fixtures_dir().glob("cassette_*.json")
+    names = (path.stem.removeprefix("cassette_") for path in files)
+    return tuple(sorted(names))

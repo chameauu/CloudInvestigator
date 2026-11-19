@@ -1,10 +1,9 @@
-"""FastAPI spike app — POST /api/investigate, SSE progress, inline HTML demo.
+"""FastAPI app — POST /api/investigate, SSE progress, inline HTML demo.
 
-Spike honesty note: POST runs the graph once (offline, deterministic) and
-caches the node-by-node event log; the SSE route then streams that log with
-EventSourceResponse. True *live* streaming — competing hypotheses dying as
-evidence lands (roadmap Step 2 item 7) — swaps this same route to a background
-graph.stream() without changing the event shapes the client already consumes.
+POST runs the graph synchronously (offline, deterministic cassette) and caches
+the node-by-node event log; the SSE route then streams that log. The event
+shapes are stable, so a live graph stream can replace the cached log without
+changing the browser client.
 """
 
 from __future__ import annotations
@@ -17,8 +16,9 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from ..engine.graph import DEFAULT_SCENARIO, run_streamed
+from ..sources.fake import available_scenarios
 
-app = FastAPI(title="AI-CLOUD-INVESTIGATION")
+app = FastAPI(title="CloudInvestigator")
 
 #: investigation_id -> {"report": InvestigationReport, "events": list[dict]}
 _STORE: dict[str, dict] = {}
@@ -33,7 +33,16 @@ class InvestigateRequest(BaseModel):
 @app.post("/api/investigate")
 def investigate(req: InvestigateRequest) -> dict:
     """Run the investigation graph synchronously (offline demo cassette)."""
-    report, events = run_streamed(req.question, req.scenario)
+    try:
+        report, events = run_streamed(req.question, req.scenario)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"unknown scenario {req.scenario!r} — available: "
+                + ", ".join(available_scenarios())
+            ),
+        ) from exc
     _STORE[report.investigation_id] = {"report": report, "events": events}
     return report.model_dump(mode="json")
 
@@ -71,7 +80,7 @@ _INDEX_HTML = """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>AI-CLOUD-INVESTIGATION</title>
+<title>CloudInvestigator</title>
 <style>
   body { font-family: ui-monospace, Menlo, Consolas, monospace; margin: 2rem; max-width: 60rem; }
   h1 { font-size: 1.2rem; }
@@ -81,7 +90,7 @@ _INDEX_HTML = """<!doctype html>
 </style>
 </head>
 <body>
-<h1>AI-CLOUD-INVESTIGATION <small>offline demo — S3 access-denied cassette</small></h1>
+<h1>CloudInvestigator <small>offline demo — S3 access-denied cassette</small></h1>
 <form id="f">
   <textarea id="q" rows="3">Since this morning the QA data-lake ingestion job fails: \
 qa-data-lake S3 bucket are rejected with AccessDenied. Why?</textarea>

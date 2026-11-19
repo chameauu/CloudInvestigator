@@ -17,7 +17,7 @@ from pathlib import Path
 from cloud_investigator.contracts import InvestigationReport, TimeRange
 from cloud_investigator.engine.graph import get_graph, initial_state
 from cloud_investigator.eval import load_golden
-from cloud_investigator.sources.fake import load_cassette
+from cloud_investigator.sources.fake import available_scenarios, load_cassette
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GOLDEN = REPO_ROOT / "evals" / "golden.yaml"
@@ -201,7 +201,13 @@ def main() -> int:
     if args.list:
         return _list_scenarios()
 
-    cassette = load_cassette(args.scenario)
+    try:
+        cassette = load_cassette(args.scenario)
+    except FileNotFoundError:
+        print(f"{RED}unknown scenario{RESET} {args.scenario!r}")
+        print(f"available: {', '.join(available_scenarios())}")
+        print(f"{DIM}try: make demo SCENARIO=ecs_task_oom{RESET}")
+        return 1
     script = cassette.get("demo_script") or {}
 
     print(f"{BOLD}CloudInvestigator{RESET} — read-only investigation demo")
