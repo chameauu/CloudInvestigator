@@ -2,4 +2,5 @@
 
 Read-only diagnostic assistant for Dev/QA cloud environments.
 """
+
 __version__ = "0.1.0"

@@ -1,0 +1,19 @@
+{
+  "scenario": "s3_access_denied",
+  "source": "cloudwatch_logs",
+  "description": "Replay of CloudWatch Logs filter_log_events for the S3 AccessDenied demo. Event messages are reused verbatim from fixtures/cassette_s3_access_denied.json so the probe layer and the spike cassette tell the same story. The filter term 'qa-data-lake' matches both recorded events (it is the bucket under investigation).",
+  "log_group": "/aws/lambda/qa-ingest-uploader",
+  "filter_pattern": "qa-data-lake",
+  "events": [
+    {
+      "event_id": "cwl-3461208101841",
+      "ts": "2026-11-18T09:02:41.872Z",
+      "message": "2026-11-18T09:02:41.872Z INFO qa-ingest-uploader: config watcher detected s3:PutBucketPolicy invoked on arn:aws:s3:::qa-data-lake by role/ops-automation (new policy version v3)"
+    },
+    {
+      "event_id": "cwl-3461208102141",
+      "ts": "2026-11-18T09:14:02.114Z",
+      "message": "2026-11-18T09:14:02.114Z ERROR qa-ingest-uploader: UploadTask failed — An error occurred (AccessDenied) when calling the GetObject operation: Access Denied (bucket=qa-data-lake, key=invoices/2026-11-18/part-0001.csv)"
+    }
+  ]
+}

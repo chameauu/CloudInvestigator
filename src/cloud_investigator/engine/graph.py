@@ -20,10 +20,10 @@ reducer collisions on parallel branches — is avoided BY CONSTRUCTION here):
   claim (hypothesis or finding) whose evidence_ids do not resolve to ids
   actually present in state.
 """
+
 from __future__ import annotations
 
-from typing import Iterator, Optional
-
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
@@ -33,12 +33,13 @@ from ..contracts import (
     Hypothesis,
     InvestigationReport,
     ProbePlan,
-    TimeRange,
     TimelineEvent,
+    TimeRange,
 )
 from ..llm.fake import FakeLLM
 from ..sources.base import ProbeContext
-from ..sources.fake import load_cassette, make_source, registered_sources
+from ..sources.fake import load_cassette
+from ..sources.probes import make_probe, registered_probes
 from .state import InvestigationState, ProbeBranch
 
 DEFAULT_SCENARIO = "s3_access_denied"
@@ -53,7 +54,7 @@ def intake(state: InvestigationState) -> dict:
     scenario = state.get("scenario", "")
     demo_mode = bool(state.get("demo_mode", True))
 
-    time_range: Optional[TimeRange] = None
+    time_range: TimeRange | None = None
     demo_script: dict = {}
     service = ""
     if demo_mode and scenario:
@@ -86,7 +87,7 @@ def plan(state: InvestigationState) -> dict:
 def gate(state: InvestigationState) -> dict:
     """Which planned sources are actually connected here. Unavailable sources
     are reported (skipped), never silently dropped; no usable source → abstain."""
-    known = registered_sources()
+    known = registered_probes()
     planned = list(state["plan"].sources) if state.get("plan") else []
     skipped = [s for s in planned if s not in known]
 
@@ -137,7 +138,7 @@ def probe_source(branch: ProbeBranch) -> dict:
         scenario=branch.get("scenario", ""),
         demo_mode=bool(branch.get("demo_mode", False)),
     )
-    result = make_source(ctx.source, ctx.scenario).probe(ctx)
+    result = make_probe(ctx).probe(ctx)
 
     fallback_ts = ctx.time_range.start if ctx.time_range else None
     timeline: list[TimelineEvent] = []
@@ -303,21 +304,15 @@ def report(state: InvestigationState) -> dict:
     ]:
         citations.setdefault((c.chunk_id, c.source), c)
 
-    has_findings = any(
-        f.severity in ("critical", "high", "medium") for f in findings
-    )
+    has_findings = any(f.severity in ("critical", "high", "medium") for f in findings)
     abstain_reason = state.get("abstain_reason", "")
     if not has_findings and not abstain_reason:
-        abstain_reason = (
-            "insufficient evidence — no confirmed finding survived verification"
-        )
+        abstain_reason = "insufficient evidence — no confirmed finding survived verification"
     abstained = not has_findings
 
     confidence = "low"
     if has_findings:
-        confidence = (
-            "high" if any(h.status == "confirmed" for h in hypotheses) else "medium"
-        )
+        confidence = "high" if any(h.status == "confirmed" for h in hypotheses) else "medium"
 
     inv = InvestigationReport(
         investigation_id=state.get("investigation_id", ""),
@@ -341,7 +336,19 @@ def report(state: InvestigationState) -> dict:
 # ------------------------------------------------------------------ compile
 
 
-def build_graph():
+def build_graph(
+    checkpointer: BaseCheckpointSaver | None = None,
+    interrupt_before: list[str] | None = None,
+):
+    """Compile the investigation graph.
+
+    Offline by default: no checkpointer, no interrupts — ``scripts/smoke.py``
+    and the API run fully DB-free. ``checkpointer`` wires LangGraph checkpoint
+    persistence (thread_id = investigation_id, see ``store.checkpointer``);
+    ``interrupt_before`` is the restart-drill seam (stop at a node boundary,
+    resume from the checkpoint with the same thread_id). Node logic, reducers,
+    and the offline default are untouched — this only passes compile options.
+    """
     graph = StateGraph(InvestigationState)
     graph.add_node("intake", intake)
     graph.add_node("plan", plan)
@@ -361,7 +368,7 @@ def build_graph():
     graph.add_edge("hypothesize", "verify")
     graph.add_edge("verify", "report")
     graph.add_edge("report", END)
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer, interrupt_before=interrupt_before)
 
 
 _GRAPH = None
@@ -385,14 +392,65 @@ def initial_state(
 
 
 def run_investigation(
-    question: str = "", scenario: str = DEFAULT_SCENARIO
+    question: str = "",
+    scenario: str = DEFAULT_SCENARIO,
+    *,
+    persist: bool = False,
+    checkpointer: BaseCheckpointSaver | None = None,
+    thread_id: str | None = None,
+    interrupt_before: list[str] | None = None,
+    resume: bool = False,
 ) -> InvestigationReport:
-    """One offline run; returns the typed report."""
-    final = get_graph().invoke(initial_state(question, scenario))
+    """One offline run; returns the typed report.
+
+    Default: no database at all — no checkpointer, no persistence (smoke path).
+    With a checkpointer, ``thread_id`` defaults to the investigation id minted
+    by intake (``inv:{scenario}``) so checkpoints survive process restarts;
+    ``resume=True`` continues an interrupted thread from its checkpoint.
+    ``persist=True`` write-throughs the finished run to the Postgres ledger
+    (probe results first, then the report). Interrupted legs (no report yet)
+    are driven at the graph level by the restart drill, not here — this
+    function returns a report or raises.
+    """
+    if resume and checkpointer is None:
+        raise ValueError("resuming requires a checkpointer")
+    if checkpointer is None and interrupt_before is None:
+        app = get_graph()
+    else:
+        app = build_graph(checkpointer=checkpointer, interrupt_before=interrupt_before)
+    state_in = None if resume else initial_state(question, scenario)
+    config = None
+    if checkpointer is not None:
+        config = {"configurable": {"thread_id": thread_id or f"inv:{scenario or 'adhoc'}"}}
+    final = app.invoke(state_in, config=config)
     report_obj = final.get("report")
     if not isinstance(report_obj, InvestigationReport):
         raise RuntimeError("graph finished without a typed InvestigationReport")
+    if persist:
+        _persist_run(final, report_obj)
     return report_obj
+
+
+def _scope_echo(time_range: TimeRange | None) -> dict | None:
+    """The window actually queried — echoed onto every persisted tool call."""
+    return {"time_range": time_range.model_dump(mode="json")} if time_range else None
+
+
+def _persist_run(final: dict, report: InvestigationReport) -> None:
+    """Write-through the finished run to the Postgres ledger (explicit opt-in).
+
+    Lazy import: the offline default never touches psycopg, so smoke.py stays
+    DB-free even though the store ships with the package.
+    """
+    from ..store.ledger import persist_investigation, persist_probe_branch
+
+    persist_probe_branch(
+        report.investigation_id,
+        final.get("evidence") or [],
+        final.get("tool_calls") or [],
+        scope=_scope_echo(final.get("time_range")),
+    )
+    persist_investigation(report, dict(final.get("coverage") or {}))
 
 
 def run_streamed(
@@ -405,10 +463,8 @@ def run_streamed(
     as separate probe_source events, one per source.
     """
     events: list[dict] = []
-    report_obj: Optional[InvestigationReport] = None
-    for chunk in get_graph().stream(
-        initial_state(question, scenario), stream_mode="updates"
-    ):
+    report_obj: InvestigationReport | None = None
+    for chunk in get_graph().stream(initial_state(question, scenario), stream_mode="updates"):
         for node, update in chunk.items():
             if node == "report":
                 report_obj = (update or {}).get("report")

@@ -9,10 +9,11 @@ House rules (derived from the inspiration research, docs/inspiration-and-bluepri
    probe records what was actually executed (ToolCallRecord) so the report can
    show its own coverage honestly.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -20,18 +21,19 @@ Severity = Literal["critical", "high", "medium", "low", "info"]
 Confidence = Literal["high", "medium", "low"]
 
 SourceKind = Literal[
-    "cloudwatch_logs",      # CloudWatch Logs Insights / filter_log_events
-    "cloudwatch_metrics",    # GetMetricData
-    "resource_state",        # describe_*/list_*/get_* across services
-    "sql",                   # authorized read-only database
-    "runbook",               # RAG over runbooks / past postmortems
-    "catalog",               # service catalog / topology map
-    "web",                   # optional external research
+    "cloudwatch_logs",  # CloudWatch Logs Insights / filter_log_events
+    "cloudwatch_metrics",  # GetMetricData
+    "resource_state",  # describe_*/list_*/get_* across services
+    "sql",  # authorized read-only database
+    "runbook",  # RAG over runbooks / past postmortems
+    "catalog",  # service catalog / topology map
+    "web",  # optional external research
 ]
 
 
 class TimeRange(BaseModel):
     """All data queries are windowed — no unbounded API calls."""
+
     start: datetime
     end: datetime
     label: str = ""
@@ -40,12 +42,13 @@ class TimeRange(BaseModel):
 class ResourceRef(BaseModel):
     """A resolved cloud resource. Deterministic: resolved from the service
     catalog or a describe call — never invented by an LLM node."""
+
     provider: Literal["aws", "azure", "gcp", "k8s", "sql", "unknown"] = "aws"
     account_id: str = ""
     region: str = ""
-    service: str = ""          # rds, ec2, alb, s3, ecs, lambda...
-    resource_type: str = ""     # db_instance, load_balancer, bucket...
-    resource_id: str = ""       # stable identifier; ARN when available
+    service: str = ""  # rds, ec2, alb, s3, ecs, lambda...
+    resource_type: str = ""  # db_instance, load_balancer, bucket...
+    resource_id: str = ""  # stable identifier; ARN when available
     name: str = ""
     tags: dict[str, str] = Field(default_factory=dict)
 
@@ -66,19 +69,21 @@ class ResourceRef(BaseModel):
 class EvidenceItem(BaseModel):
     """Ground truth produced by a tool. The report cites these by id.
     ids are deterministic in demo mode: `ev:{scenario}:{source}:{seq}`."""
+
     id: str
     kind: SourceKind
-    resource: Optional[ResourceRef] = None
+    resource: ResourceRef | None = None
     query: str = Field(default="", description="Exact query/command executed")
-    ts: Optional[TimeRange] = None
+    ts: TimeRange | None = None
     excerpt: str = Field(description="Verbatim, capped excerpt — never paraphrased")
-    score: Optional[float] = None
+    score: float | None = None
     raw_ref: str = Field(default="", description="Pointer to stored raw payload")
     truncated: bool = False
 
 
 class Citation(BaseModel):
     """A runbook chunk grounding a recommendation (RAG)."""
+
     chunk_id: str
     source: str = Field(description="Runbook file name")
     section: str = Field(description="Heading breadcrumb of the chunk")
@@ -88,10 +93,11 @@ class Citation(BaseModel):
 
 class Finding(BaseModel):
     """An evidence-backed problem statement."""
+
     severity: Severity
     title: str
     detail: str
-    resource: Optional[ResourceRef] = None
+    resource: ResourceRef | None = None
     cause_token: str = Field(
         default="",
         description="Stable CamelCase cause taxonomy, e.g. ConnectionPoolExhausted, "
@@ -107,6 +113,7 @@ class Finding(BaseModel):
 class Hypothesis(BaseModel):
     """A ranked probable cause. Confirmed ones graduate into findings;
     unverifiable ones stay hypotheses — saying so is a feature."""
+
     rank: int = 1
     statement: str
     status: Literal["confirmed", "refuted", "unverified"] = "unverified"
@@ -124,6 +131,7 @@ class TimelineEvent(BaseModel):
 
 class CoverageReport(BaseModel):
     """What the investigation actually did — the anti-hallucination receipt."""
+
     sources_planned: list[str] = Field(default_factory=list)
     sources_queried: list[str] = Field(default_factory=list)
     tool_calls: int = 0
@@ -136,7 +144,7 @@ class InvestigationReport(BaseModel):
     question: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
     summary: str
-    time_range: Optional[TimeRange] = None
+    time_range: TimeRange | None = None
     timeline: list[TimelineEvent] = Field(default_factory=list)
     hypotheses: list[Hypothesis] = Field(default_factory=list)
     findings: list[Finding] = Field(default_factory=list)
@@ -155,8 +163,9 @@ class InvestigationReport(BaseModel):
 
 class ProblemStatement(BaseModel):
     """Normalized intake of the natural-language question."""
+
     question: str
-    time_range: Optional[TimeRange] = None
+    time_range: TimeRange | None = None
     resource_hints: list[str] = Field(
         default_factory=list,
         description="Strings to resolve against the service catalog",
@@ -166,7 +175,8 @@ class ProblemStatement(BaseModel):
 
 class ProbePlan(BaseModel):
     """What the planner decided to investigate."""
+
     sources: list[SourceKind]
-    time_range: Optional[TimeRange] = None
+    time_range: TimeRange | None = None
     resource_targets: list[ResourceRef] = Field(default_factory=list)
     rationale: str = ""

@@ -8,6 +8,7 @@ Exit 0 iff:
   - the poisoned hypothesis was demoted to unverified (verify guard works)
   - findings are grounded in runbook citations
 """
+
 from cloud_investigator.contracts import InvestigationReport
 from cloud_investigator.engine.graph import DEFAULT_SCENARIO, run_investigation
 
@@ -34,15 +35,19 @@ def main() -> int:
     # Spike-specific guards (prove the machinery, not just the happy path)
     assert unverified, "poisoned hypothesis was not demoted to unverified by verify"
     assert all(f.citations for f in report.findings), "findings must carry runbook citations"
-    assert all(
-        i in valid_ids for t in report.timeline for i in t.evidence_ids
-    ), "timeline cites unknown evidence"
+    assert all(i in valid_ids for t in report.timeline for i in t.evidence_ids), (
+        "timeline cites unknown evidence"
+    )
 
     print("SMOKE OK — typed InvestigationReport end-to-end, fully offline")
-    print(f"  hypotheses : {len(report.hypotheses)} "
-          f"(confirmed={len(confirmed)}, unverified={len(unverified)})")
-    print(f"  findings   : {len(report.findings)}  evidence: {len(report.evidence)}  "
-          f"tool_calls: {report.coverage.tool_calls}")
+    print(
+        f"  hypotheses : {len(report.hypotheses)} "
+        f"(confirmed={len(confirmed)}, unverified={len(unverified)})"
+    )
+    print(
+        f"  findings   : {len(report.findings)}  evidence: {len(report.evidence)}  "
+        f"tool_calls: {report.coverage.tool_calls}"
+    )
     print()
     print(report.model_dump_json(indent=2))
     return 0

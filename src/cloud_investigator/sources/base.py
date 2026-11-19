@@ -7,10 +7,10 @@ the council's 'read-only is architecture'):
 - Every probe returns the same envelope: evidence + what was executed + failures.
 - Unbounded data is forbidden: `cap_excerpt()` is applied to everything stored.
 """
+
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Literal, Optional, Protocol, runtime_checkable
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -25,9 +25,28 @@ MAX_EVIDENCE_PER_PROBE = 40
 #: *before* a client is created, so a prompt-injected "delete" never runs.
 READ_PREFIXES = ("describe", "list", "get", "query", "search", "filter")
 WRITE_VERBS = (
-    "create", "delete", "update", "put", "post", "patch", "terminate",
-    "stop", "start", "reboot", "modify", "attach", "detach", "tag", "run",
-    "execute", "insert", "drop", "alter", "grant", "revoke", "truncate",
+    "create",
+    "delete",
+    "update",
+    "put",
+    "post",
+    "patch",
+    "terminate",
+    "stop",
+    "start",
+    "reboot",
+    "modify",
+    "attach",
+    "detach",
+    "tag",
+    "run",
+    "execute",
+    "insert",
+    "drop",
+    "alter",
+    "grant",
+    "revoke",
+    "truncate",
 )
 
 
@@ -58,8 +77,10 @@ def make_evidence_id(scenario: str, source: str, seq: int) -> str:
 
 # ---------------------------------------------------------------- envelopes
 
+
 class ToolCallRecord(BaseModel):
     """Audit trail of one executed call — feeds coverage + timeline."""
+
     source: str
     operation: str
     params: dict = Field(default_factory=dict)
@@ -70,18 +91,20 @@ class ToolCallRecord(BaseModel):
 
 class ProbeContext(BaseModel):
     """Everything a source is allowed to know about one probe."""
+
     investigation_id: str
     source: str
     kind: SourceKind
-    time_range: Optional[TimeRange] = None
+    time_range: TimeRange | None = None
     resource_targets: list[ResourceRef] = Field(default_factory=list)
-    scenario: str = ""          # fixture scenario_id when demo_mode
+    scenario: str = ""  # fixture scenario_id when demo_mode
     demo_mode: bool = False
 
 
 class ProbeResult(BaseModel):
     """Uniform probe envelope. Sources NEVER raise to the graph — failures are
     data, so the report can say 'skipped: athena — not authorized'."""
+
     evidence: list[EvidenceItem] = Field(default_factory=list)
     tool_calls: list[ToolCallRecord] = Field(default_factory=list)
     failures: list[str] = Field(default_factory=list)

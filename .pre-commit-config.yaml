@@ -1,0 +1,24 @@
+# Local quality gate, mirroring .github/workflows/ci.yml plus file hygiene.
+# Install once per clone:  uv run pre-commit install
+# Run manually on all files:  uv run pre-commit run --all-files
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+      - id: check-json
+      - id: detect-private-key
+      - id: no-commit-to-branch
+        args: [--branch, main]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.5
+    hooks:
+      - id: ruff
+        name: ruff check (lint only, no auto-fix)
+      - id: ruff-format
+        name: ruff format (check only)
+        args: [--check]

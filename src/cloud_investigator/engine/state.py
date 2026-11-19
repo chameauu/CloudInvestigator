@@ -7,10 +7,10 @@ Graph shape (docs/inspiration-and-blueprint.md §4):
 The probe fan-out follows the LangGraph map-reduce pattern (one branch per
 planned source); joins are implicit via list reducers on the shared state.
 """
+
 from __future__ import annotations
 
-import operator
-from typing import Annotated, Optional, TypedDict
+from typing import Annotated, TypedDict
 
 from ..contracts import (
     Citation,
@@ -20,12 +20,12 @@ from ..contracts import (
     InvestigationReport,
     ProbePlan,
     ResourceRef,
-    TimeRange,
     TimelineEvent,
+    TimeRange,
 )
 
 
-def merge_list(left: Optional[list], right: Optional[list]) -> list:
+def merge_list(left: list | None, right: list | None) -> list:
     """Reducer for fan-out branches: append, tolerating first-write None."""
     return [*([] if left is None else left), *([] if right is None else right)]
 
@@ -37,13 +37,13 @@ class InvestigationState(TypedDict, total=False):
     investigation_id: str
     question: str
     service: str
-    time_range: Optional[TimeRange]
+    time_range: TimeRange | None
     demo_mode: bool
-    scenario: str            # fixture scenario_id when demo_mode
-    demo_script: dict        # canned planner/analyst outputs for FakeLLM (offline)
+    scenario: str  # fixture scenario_id when demo_mode
+    demo_script: dict  # canned planner/analyst outputs for FakeLLM (offline)
 
     # planning
-    plan: Optional[ProbePlan]
+    plan: ProbePlan | None
 
     # accumulated by probe branches (reducers)
     evidence: Annotated[list[EvidenceItem], merge_list]
@@ -58,14 +58,15 @@ class InvestigationState(TypedDict, total=False):
     # output
     coverage: dict
     abstain_reason: str
-    report: Optional[InvestigationReport]
+    report: InvestigationReport | None
 
 
 class ProbeBranch(TypedDict, total=False):
     """Input payload of one Send('probe_source', ...) invocation."""
+
     investigation_id: str
-    source: str                       # source adapter name
-    time_range: Optional[TimeRange]
+    source: str  # source adapter name
+    time_range: TimeRange | None
     resource_targets: list[ResourceRef]
-    scenario: str                     # fixture scenario_id when demo_mode
+    scenario: str  # fixture scenario_id when demo_mode
     demo_mode: bool

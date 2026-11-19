@@ -9,6 +9,7 @@ reject-and-retry second call. That determinism is deliberate: it lets the
 citation-ID guard prove its demote path offline (a poisoned claim stays
 poisoned after one retry, so it must be demoted, never passed through).
 """
+
 from __future__ import annotations
 
 from ..contracts import Finding, Hypothesis, ProbePlan, ResourceRef, TimeRange
@@ -20,9 +21,7 @@ class FakeLLM:
     def __init__(self, demo_script: dict) -> None:
         self._script = demo_script or {}
 
-    def plan(
-        self, question: str, service: str, time_range: TimeRange | None
-    ) -> ProbePlan:
+    def plan(self, question: str, service: str, time_range: TimeRange | None) -> ProbePlan:
         """Pick which sources to probe. A real LLM reads the question; the
         demo script answers deterministically."""
         spec = self._script.get("plan", {})

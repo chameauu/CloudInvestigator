@@ -174,9 +174,9 @@
         "recommendation": "Remove or scope down the explicit Deny statement (policy version 3) for role/qa-ingest-uploader on arn:aws:s3:::qa-data-lake, then re-run the ingest task and confirm a s3:GetObject succeeds end-to-end.",
         "citations": [
           {
-            "chunk_id": "rb:s3-accessdenied:3",
-            "source": "runbooks/s3-accessdenied.md",
-            "section": "IAM > Explicit Deny in bucket policy",
+            "chunk_id": "rb:s3-access-denied:s3-access-denied-iam-policy-diagnosis:94d8e3b6",
+            "source": "runbooks/s3-access-denied.md",
+            "section": "S3 AccessDenied — IAM policy diagnosis",
             "score": 0.91,
             "excerpt": "If s3:GetObject returns AccessDenied while the caller's IAM identity policy already grants s3:GetObject, check the bucket policy for an explicit Deny statement — an explicit Deny always wins over any Allow."
           }

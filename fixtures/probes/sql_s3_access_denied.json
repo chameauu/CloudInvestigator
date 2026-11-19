@@ -1,0 +1,45 @@
+{
+  "scenario": "s3_access_denied",
+  "source": "sql",
+  "database": "qa_audit",
+  "description": "Replay of the authorized QA audit-DB reads for the S3 AccessDenied demo. The two rows reuse the audit rows from fixtures/cassette_s3_access_denied.json: the IAM DENY decision on the failed upload and the originating explicit-deny policy statement. The third query replays the honest failure of the existing scenario (relation does not exist), preserved verbatim.",
+  "queries": [
+    {
+      "sql": "SELECT actor, action, decision, resource, policy_id, ts FROM iam_audit_events WHERE resource LIKE 'arn:aws:s3:::qa-data-lake%' AND ts BETWEEN '2026-11-18T08:00:00Z' AND '2026-11-18T12:00:00Z' ORDER BY ts LIMIT 50",
+      "binds": [],
+      "ts_column": "ts",
+      "rows": [
+        {
+          "actor": "role/qa-ingest-uploader",
+          "action": "s3:GetObject",
+          "decision": "DENY",
+          "resource": "arn:aws:s3:::qa-data-lake/invoices/2026-11-18/part-0001.csv",
+          "policy_id": "ExplicitDenyStmt-bucketpolicy-v3",
+          "ts": "2026-11-18T09:14:02Z"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT policy_id, effect, principal, action, resource, added_by, applied_at FROM policy_statements WHERE policy_id = 'ExplicitDenyStmt-bucketpolicy-v3' ORDER BY applied_at LIMIT 10",
+      "binds": [],
+      "ts_column": "applied_at",
+      "rows": [
+        {
+          "policy_id": "ExplicitDenyStmt-bucketpolicy-v3",
+          "effect": "Deny",
+          "principal": "role/qa-ingest-uploader",
+          "action": "s3:GetObject",
+          "resource": "arn:aws:s3:::qa-data-lake/*",
+          "added_by": "role/ops-automation",
+          "applied_at": "2026-11-18T09:01:59Z"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT request_id, status FROM s3_access_logs WHERE bucket = 'qa-data-lake' ORDER BY ts DESC LIMIT 20",
+      "binds": [],
+      "error": "relation \"s3_access_logs\" does not exist",
+      "rows": []
+    }
+  ]
+}

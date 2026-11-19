@@ -328,6 +328,24 @@ uv run pytest tests/unit -q
 uv run python scripts/smoke.py
 ```
 
+### CI and pre-commit (quality automation)
+
+The commands above are enforced by automation, not just documented:
+
+- **CI pipeline — `.github/workflows/ci.yml` (GitHub Actions).** Runs on every push and
+  pull request, in order: `uv sync --frozen`, `ruff check`, unit tests (offline), and
+  `scripts/smoke.py` (cassette end-to-end). The integration suite runs as a separate job
+  against a Postgres + pgvector service container and fails — never skips — when the
+  database is unreachable. CI is keyless by construction: cassettes and fake embeddings
+  mean no cloud credentials and no LLM keys ever enter the pipeline. From the moment the
+  repository is pushed to a GitHub remote, no phase is done while CI is red; a red build
+  is fixed forward, never bypassed or deleted (same rule as commit hooks, §4).
+- **Pre-commit — `.pre-commit-config.yaml`.** Hooks mirror what CI runs, plus hygiene:
+  `ruff` (lint + format), `end-of-file-fixer`, `trailing-whitespace`, `check-yaml`,
+  `check-json`, `detect-private-key`, and `no-commit-to-branch` protecting `main`. Install
+  once with `uv run pre-commit install`; a change that would fail CI then fails locally
+  first, at commit time.
+
 ---
 
 ## 14. Definition of done
