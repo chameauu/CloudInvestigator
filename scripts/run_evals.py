@@ -79,7 +79,10 @@ def main() -> int:
         return 1
 
     print()
-    print("EVALS OK — all scenarios scored, deterministic replays, no forbidden claims")
+    print(
+        "EVALS OK — conformance replay: expected component/fault per scenario,"
+        " deterministic replays, no forbidden claims"
+    )
     return 0
 
 

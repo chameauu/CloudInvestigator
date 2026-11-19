@@ -1,12 +1,18 @@
 # CloudInvestigator
 
-CloudInvestigator is a read-only agentic cloud investigation assistant for developers,
-Cloud Engineers and DevOps. Given a problem described in natural language, it
-determines which sources are useful, identifies the resources involved, probes
-the authorized cloud services and databases with strictly read-only, scoped
-queries, and correlates the results into an evidence-cited report of probable
-causes and recommendations — every claim backed by evidence captured verbatim
-by the tools, and honest abstention when the evidence is insufficient.
+CloudInvestigator is a read-only investigation engine for recorded cloud
+incidents, built around a trust architecture rather than around a model. A
+LangGraph pipeline resolves a problem described in natural language to a
+recorded scenario, decides from a service catalog which resources are in scope,
+probes the registered sources through strictly read-only adapters, ranks
+competing explanations, eliminates them as evidence arrives, and emits an
+evidence-cited report — with abstention when the question or the evidence does
+not support a conclusion.
+
+**Scope, stated plainly:** the probes replay committed cassettes, and
+question-to-scenario selection is deterministic vocabulary routing, not model
+inference. Live cloud access and LLM reasoning are not implemented — see
+[Scope and limitations](#scope-and-limitations).
 
 ## Quickstart (fully offline demo)
 
@@ -34,6 +40,41 @@ the steps that prove recovery. A presenter-ready walkthrough is in
 expected output, and a checklist) is in
 [`docs/manual-testing.md`](docs/manual-testing.md).
 
+## Scope and limitations
+
+This is an offline replay harness with a production-shaped trust layer. It is
+honest about the difference:
+
+- **Question interpretation is routing, not reasoning.** The question is scored
+  against the vocabulary of the recorded scenarios (services, resources, fault
+  classes). A unique, specific match selects the scenario; anything else
+  abstains with the reason. There is deliberately no silent default scenario.
+  A model-driven planner is the intended replacement behind the same seam.
+- **Probes replay hand-authored cassettes.** No live cloud API is called. The
+  client protocols (`LogsClient`, `SqlClient`) are the seam a live adapter
+  plugs into; none is wired.
+- **One environment.** `catalog.yaml` describes a single development
+  environment; Dev/QA separation is not represented.
+- **Runbook retrieval is a tested library, not a pipeline stage.** Hybrid
+  retrieval (pgvector + full-text + RRF) and ingestion work and are covered by
+  tests, but no graph node invokes retrieval; report citations are authored
+  with the scenario.
+- **Read-only is enforced in the application, not by IAM.** The prefix
+  allowlist, the SQL triple guard, `SET TRANSACTION READ ONLY`, and statement
+  timeouts are real and tested. A dedicated read-only cloud credential policy
+  is required in any live deployment and is not implemented or proven here.
+- **The eval is a conformance test.** Expectations, cassettes, and scripts
+  were authored together, so a 6/6 score proves the harness faithfully replays
+  what it was given. Two rows carry signal independent of the script: the
+  poisoned-evidence row (the citation guard demotes regardless) and the
+  abstention row (a genuine code path).
+- **No model in the loop.** Diagnosis runs through a cassette diagnoser and a
+  deterministic fallback; the `Diagnoser` protocol is where a real model
+  attaches, and the fallback is its measurable baseline.
+- **Investigation identity is scenario-derived** (`inv:<scenario>`), so
+  re-running a scenario updates the same ledger row instead of recording a new
+  run.
+
 ## Local stack
 
 ```bash
@@ -41,7 +82,7 @@ make up               # Postgres 18 + pgvector (Docker); waits until ready
 make seed             # apply migrations + ingest the runbook corpus
 make test             # offline unit + contract tests
 make test-integration # integration tests against the running stack
-make verify           # lint + offline tests + end-to-end smoke + eval harness
+make verify           # lint + offline tests + end-to-end smoke + conformance eval
 make down             # stop, keep data
 make reset            # stop and delete local state
 ```

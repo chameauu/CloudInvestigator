@@ -69,7 +69,7 @@ Pick one with `make demo SCENARIO=ecs_task_oom`.
 10. **Close.** "Same input twice gives a byte-identical report; the harness
     scores six scenarios offline in about a second."
 
-## The scoreboard
+## The scoreboard (a conformance check, not an accuracy benchmark)
 
 ```
 scenario                   component  fault class           claims cited
@@ -81,7 +81,9 @@ poisoned_logs              alb        TargetHealthDegraded  2/2
 insufficient_evidence      —          —                     abstained, correctly
 ```
 
-- **6/6** scenarios: correct component and correct fault class.
+- **6/6** scenarios replay with the expected component and fault class. The
+  expectations were authored alongside the cassettes, so this measures that the
+  harness reproduces the script — not diagnostic accuracy.
 - **100%** of actionable claims cite evidence ids that resolve to items a probe
   produced; the poisoned scenario's injected claim never reaches a finding.
 - **Replay determinism**: every scenario replayed twice produces an identical

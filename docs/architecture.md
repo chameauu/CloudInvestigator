@@ -69,7 +69,7 @@
 
 **L6 — Ledger (Postgres).** One canonical store: every investigation, evidence item, tool call, hypothesis, and report section is persisted write-through. `tool_calls` doubles as audit + budget + replay (`query_executed`, `query_hash`). The LangGraph checkpointer persists graph state under `thread_id = investigation_id` → the **restart drill** (interrupt → resume → ledger matches) and the **replay drill** (same cassette twice → identical report, determinism gate).
 
-**L7 — Determinism & evaluation.** Everything authorizing is code (guards, ID checks, policy tables, fallbacks); the LLM only correlates and narrates — code authorizes, the model never executes. `FakeLLM` + cassettes make the whole pipeline reproducible offline; the eval harness scores confirmed-hypothesis accuracy *and* abstention correctness on golden scenarios, including a poisoned-evidence prompt-injection case.
+**L7 — Determinism & evaluation.** Everything authorizing is code (guards, ID checks, policy tables, fallbacks); the LLM only correlates and narrates — code authorizes, the model never executes. `FakeLLM` + cassettes make the whole pipeline reproducible offline; the eval harness is a **conformance check** — it replays each golden scenario twice, asserts the expected component and fault class, verifies every claim cites a minted evidence id, and checks abstention expectations, including a poisoned-evidence prompt-injection case. Expectations and cassettes are authored together, so it does not measure diagnostic accuracy against unseen incidents.
 
 ## 3. Security model (dual control)
 
