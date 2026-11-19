@@ -92,6 +92,7 @@ def build_plans(findings: list[Finding], evidence: list[EvidenceItem]) -> list[R
 def render(plan: RecommendationPlan) -> str:
     """Plain-text form for `InvestigationReport.recommendations`."""
     culprit = f" (culprit: {plan.culprit_version})" if plan.culprit_version else ""
+    action = plan.action.strip().rstrip(".")
     rollback = "; ".join(plan.rollback_steps)
     verify = "; ".join(plan.verification_steps)
-    return f"{plan.action}{culprit}. Rollback: {rollback}. Verify: {verify}."
+    return f"{action}{culprit}. Rollback: {rollback}. Verify: {verify}."

@@ -2,7 +2,7 @@
 # Stack targets drive the local compose Postgres + pgvector; test targets are
 # offline (unit + contract) vs. stack-dependent (integration).
 
-.PHONY: install up down reset seed run serve eval test test-integration verify
+.PHONY: install up down reset seed run serve demo eval test test-integration verify
 
 install:
 	uv sync
@@ -38,6 +38,11 @@ run:
 # Local API demo: POST /api/investigate + SSE event stream.
 serve:
 	uv run uvicorn cloud_investigator.api.main:app --reload
+
+# Click-through demo of one investigation in the terminal (offline).
+# Choose a scenario with: make demo SCENARIO=ecs_task_oom
+demo:
+	uv run python scripts/demo.py $(if $(SCENARIO),--scenario $(SCENARIO),)
 
 # Replay every golden scenario twice, score the reports, assert determinism
 # and the absence of forbidden (injected) claims. Fully offline.

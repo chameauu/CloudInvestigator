@@ -13,12 +13,16 @@ by the tools, and honest abstention when the evidence is insufficient.
 ```bash
 uv sync
 make run          # one typed InvestigationReport — no credentials, no API keys
+make demo         # terminal click-through: stages, eliminations, cited report
 make serve        # browser demo: POST /api/investigate + SSE progress
 ```
 
 Then open <http://127.0.0.1:8000/>: submit the natural-language problem, watch
 the investigation stream node-by-node, and read the final report. The demo
-replays deterministic cassettes in `fixtures/` (S3 access-denied scenario).
+replays deterministic cassettes in `fixtures/` — six recorded incidents
+(S3 access denied, refusing database credentials, unhealthy load-balancer
+targets, an OOM-killed task, a log line carrying an injected instruction, and a
+run with no usable data). Pick one with `make demo SCENARIO=ecs_task_oom`.
 
 Each run resolves the service against `catalog.yaml` to decide which resources
 are in scope and where to look, probes the sources that are actually
