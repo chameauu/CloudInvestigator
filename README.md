@@ -30,7 +30,9 @@ registered, then ranks at least two competing explanations — showing each one
 confirmed or eliminated as the evidence arrives. Recommendations carry the
 culprit version when the evidence names one, an explicit rollback path, and
 the steps that prove recovery. A presenter-ready walkthrough is in
-[`docs/demo.md`](docs/demo.md).
+[`docs/demo.md`](docs/demo.md), and a hands-on test script (every command, its
+expected output, and a checklist) is in
+[`docs/manual-testing.md`](docs/manual-testing.md).
 
 ## Local stack
 
