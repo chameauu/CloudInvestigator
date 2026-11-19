@@ -1,0 +1,88 @@
+{
+  "scenario_id": "ecs_task_oom",
+  "question": "The nightly export job stopped completing. The ECS service shows tasks disappearing and restarting. Why?",
+  "time_range": {
+    "start": "2026-11-19T01:30:00Z",
+    "end": "2026-11-19T03:30:00Z",
+    "label": "incident window"
+  },
+  "demo_script": {
+    "service": "batch-worker",
+    "plan": {
+      "sources": ["cloudwatch_logs"],
+      "rationale": "Tasks vanish and restart with no application error: read the batch-worker log group for the runtime's kill events. No authorized database is bound to this service."
+    },
+    "resources": [
+      {
+        "provider": "aws",
+        "region": "eu-west-1",
+        "service": "ecs",
+        "resource_type": "task_definition",
+        "resource_id": "arn:aws:ecs:eu-west-1:123456789012:task-definition/batch-worker:42",
+        "name": "batch-worker:42",
+        "tags": { "env": "qa", "owner": "data-platform", "tier": "batch" }
+      }
+    ],
+    "hypotheses": [
+      {
+        "rank": 1,
+        "statement": "Task definition v7 raised the nightly batch size to 5000 rows without raising the 2048 MiB memory limit, so the worker is OOMKilled mid-batch and restarts until the retry budget is exhausted.",
+        "status": "confirmed",
+        "arguments_for": [
+          "The task exits with code 137 (OOMKilled) exactly when container memory reaches 2048/2048 MiB",
+          "Every retry dies at the same ceiling with batch size 5000 — the signature of a limit, not a leak"
+        ],
+        "arguments_against": [],
+        "evidence_ids": [
+          "ev:ecs_task_oom:cloudwatch_logs:1",
+          "ev:ecs_task_oom:cloudwatch_logs:2"
+        ]
+      },
+      {
+        "rank": 2,
+        "statement": "Host-level memory pressure on the underlying container instance killed the task.",
+        "status": "refuted",
+        "arguments_for": [
+          "The task disappears without an application-level error"
+        ],
+        "arguments_against": [
+          "The kill is attributed to the container's own 2048 MiB limit, not to instance-level eviction — a tight host would surface as task placement failures"
+        ],
+        "evidence_ids": ["ev:ecs_task_oom:cloudwatch_logs:1"]
+      }
+    ],
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Batch worker OOMKilled at its 2048 MiB limit after the v7 batch-size increase",
+        "detail": "The nightly export worker exits with code 137 (OOMKilled) the moment container memory reaches 2048/2048 MiB. Task definition v7 raised the batch size to 5000 rows but kept the previous memory limit, so every retry dies at the same ceiling and the job never completes.",
+        "resource": {
+          "provider": "aws",
+          "region": "eu-west-1",
+          "service": "ecs",
+          "resource_type": "task_definition",
+          "resource_id": "arn:aws:ecs:eu-west-1:123456789012:task-definition/batch-worker:42",
+          "name": "batch-worker:42",
+          "tags": { "env": "qa", "owner": "data-platform", "tier": "batch" }
+        },
+        "cause_token": "OOMKilled",
+        "confidence": "high",
+        "evidence_ids": [
+          "ev:ecs_task_oom:cloudwatch_logs:1",
+          "ev:ecs_task_oom:cloudwatch_logs:2"
+        ],
+        "recommendation": "Roll the batch-worker task definition back from v7 to v6 (batch size 2500) or raise the memory limit to 4096 MiB, then confirm the nightly batch completes without exit code 137.",
+        "citations": [
+          {
+            "chunk_id": "rb:ecs-task-oom:ecs-task-oom-diagnosis-steps:c4a90f11",
+            "source": "runbooks/ecs-task-oom.md",
+            "section": "ECS task OOM — diagnosis steps",
+            "score": 0.86,
+            "excerpt": "Exit code 137 with container memory pinned at the task definition's limit is an OOM kill inside the container, not host eviction: compare the limit with the working-set growth introduced by the most recent task definition revision."
+          }
+        ]
+      }
+    ],
+    "summary": "Root cause confirmed: task definition v7 raised the batch size without raising memory, so the worker is OOMKilled at its 2048 MiB container limit on every retry. Host-level pressure is refuted because the kill is attributed to the container limit."
+  }
+}

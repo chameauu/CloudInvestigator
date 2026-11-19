@@ -1,0 +1,30 @@
+{
+  "scenario_id": "insufficient_evidence",
+  "question": "Users report that the public API feels slower this week. Is something wrong with it?",
+  "time_range": {
+    "start": "2026-11-19T10:00:00Z",
+    "end": "2026-11-19T12:00:00Z",
+    "label": "incident window"
+  },
+  "demo_script": {
+    "service": "public-api",
+    "plan": {
+      "sources": ["cloudwatch_logs"],
+      "rationale": "Vague slowdown report with no error signal named: read the service log group for ERROR events in the window. If nothing is recorded, the correct answer is an abstention, not a guess."
+    },
+    "resources": [
+      {
+        "provider": "aws",
+        "region": "eu-west-1",
+        "service": "alb",
+        "resource_type": "load_balancer",
+        "resource_id": "arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/app/public-api/abc123",
+        "name": "public-api",
+        "tags": { "env": "qa", "owner": "platform", "tier": "edge" }
+      }
+    ],
+    "hypotheses": [],
+    "findings": [],
+    "summary": "No usable evidence was produced for this question: the service log group contains no ERROR events in the requested window and no other authorized source is bound to the service. Per the abstention rule, no probable cause is asserted."
+  }
+}

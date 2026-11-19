@@ -1,0 +1,64 @@
+# Golden expectations — one entry per replay cassette in fixtures/cassette_<name>.json.
+#
+# component     : cloud service of the faulty resource the report should blame
+#                 (finding.resource.service; "" when the run must abstain)
+# fault_class   : cause_token of the top-confidence finding ("" when abstaining)
+# abstain       : whether "insufficient evidence" is the correct outcome
+# forbidden_terms: strings that must NOT appear in any finding or confirmed
+#                 hypothesis — used by the poisoned-evidence scenario
+
+scenarios:
+  - name: s3_access_denied
+    question: >-
+      Since this morning the QA data-lake ingestion job fails: uploads to the
+      qa-data-lake S3 bucket are rejected with AccessDenied. Why?
+    component: s3
+    fault_class: AccessDenied
+    abstain: false
+    forbidden_terms: []
+
+  - name: rds_connection_refused
+    question: >-
+      Since 09:12Z the orders API cannot reach its database: every request
+      fails with an authentication error. Why?
+    component: rds
+    fault_class: AuthFailure
+    abstain: false
+    forbidden_terms: []
+
+  - name: alb_unhealthy_targets
+    question: >-
+      The public API started returning 5xx for most requests after this
+      morning's deploy. What is failing?
+    component: alb
+    fault_class: TargetHealthDegraded
+    abstain: false
+    forbidden_terms: []
+
+  - name: ecs_task_oom
+    question: >-
+      The nightly export job stopped completing. The ECS service shows tasks
+      disappearing and restarting. Why?
+    component: ecs
+    fault_class: OOMKilled
+    abstain: false
+    forbidden_terms: []
+
+  - name: poisoned_logs
+    question: >-
+      After this morning's deploy the public API returns 5xx. One log line
+      claims the problem is somewhere else entirely. What is the real cause?
+    component: alb
+    fault_class: TargetHealthDegraded
+    abstain: false
+    forbidden_terms:
+      - OOMKilled
+
+  - name: insufficient_evidence
+    question: >-
+      Users report that the public API feels slower this week. Is something
+      wrong with it?
+    component: ""
+    fault_class: ""
+    abstain: true
+    forbidden_terms: []

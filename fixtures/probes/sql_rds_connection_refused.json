@@ -1,0 +1,15 @@
+{
+  "scenario": "rds_connection_refused",
+  "source": "sql",
+  "database": "orders",
+  "description": "Replay of the authorized read against the orders database for the credential-rotation scenario. The investigator's own connection is rejected exactly like the application's, so the recorded upstream error is the evidence that the credential itself is wrong (not the instance or the network).",
+  "queries": [
+    {
+      "sql": "SELECT count(*) AS open_orders FROM orders WHERE status = 'open'",
+      "binds": [],
+      "ts_column": "ts",
+      "error": "connection failed: FATAL:  password authentication failed for user \"orders_app\"",
+      "rows": []
+    }
+  ]
+}

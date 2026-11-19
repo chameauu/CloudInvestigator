@@ -1,0 +1,88 @@
+{
+  "scenario_id": "rds_connection_refused",
+  "question": "Since 09:12Z the orders API cannot reach its database: every request fails with an authentication error. Why?",
+  "time_range": {
+    "start": "2026-11-19T08:00:00Z",
+    "end": "2026-11-19T12:00:00Z",
+    "label": "incident window"
+  },
+  "demo_script": {
+    "service": "rds-orders",
+    "plan": {
+      "sources": ["cloudwatch_logs", "sql"],
+      "rationale": "Authentication failures on the orders DB: read the Postgres log group for the verbatim server-side error, then try one authorized read against the orders database to reproduce the rejection from the database side."
+    },
+    "resources": [
+      {
+        "provider": "aws",
+        "region": "eu-west-1",
+        "service": "rds",
+        "resource_type": "db_instance",
+        "resource_id": "arn:aws:rds:eu-west-1:123456789012:db:orders-db",
+        "name": "orders-db",
+        "tags": { "env": "qa", "owner": "orders-team", "tier": "data" }
+      }
+    ],
+    "hypotheses": [
+      {
+        "rank": 1,
+        "statement": "The orders-db credential secret was rotated (now v12) but the orders API tasks still present the cached v11 password, so every new connection is rejected by the server with a FATAL authentication error.",
+        "status": "confirmed",
+        "arguments_for": [
+          "Both log events are server-side FATAL 28P01 authentication failures, not timeouts — the database is up and answering",
+          "The first failure at 09:12:44Z follows the secret rotation applied at 09:10Z by the platform automation"
+        ],
+        "arguments_against": [],
+        "evidence_ids": [
+          "ev:rds_connection_refused:cloudwatch_logs:1",
+          "ev:rds_connection_refused:cloudwatch_logs:2"
+        ]
+      },
+      {
+        "rank": 2,
+        "statement": "The orders DB instance itself is down or mid-failover, which is why the API cannot connect.",
+        "status": "refuted",
+        "arguments_for": [
+          "Connection failures started abruptly this morning"
+        ],
+        "arguments_against": [
+          "A down instance produces connection timeouts or refused sockets, never a server-side password rejection"
+        ],
+        "evidence_ids": ["ev:rds_connection_refused:cloudwatch_logs:1"]
+      }
+    ],
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Stale database credential after secret rotation",
+        "detail": "The orders-db credential secret was rotated to v12 at 09:10Z, but the orders API tasks still authenticate with the cached v11 password. Every connection since 09:12:44Z is rejected by the server with FATAL 28P01 password authentication failed for user orders_app; the direct audit-DB read from the investigator is rejected the same way, confirming the credential — not the network or the instance — is the fault.",
+        "resource": {
+          "provider": "aws",
+          "region": "eu-west-1",
+          "service": "rds",
+          "resource_type": "db_instance",
+          "resource_id": "arn:aws:rds:eu-west-1:123456789012:db:orders-db",
+          "name": "orders-db",
+          "tags": { "env": "qa", "owner": "orders-team", "tier": "data" }
+        },
+        "cause_token": "AuthFailure",
+        "confidence": "high",
+        "evidence_ids": [
+          "ev:rds_connection_refused:cloudwatch_logs:1",
+          "ev:rds_connection_refused:cloudwatch_logs:2"
+        ],
+        "recommendation": "Refresh the orders-db credential in the orders API task definition so it reads secret version v12, then restart the service and confirm a new connection authenticates successfully.",
+        "citations": [
+          {
+            "chunk_id": "rb:rds-connection-exhaustion:rds-connection-exhaustion-diagnosis-steps:5f1c0a2e",
+            "source": "runbooks/rds-connection-exhaustion.md",
+            "section": "RDS connection failure — diagnosis steps",
+            "score": 0.84,
+            "excerpt": "Distinguish authentication failures (FATAL 28P01) from capacity failures (FATAL: sorry, too many clients already): the former is a credential or secret-propagation problem, the latter is a connection-pool or instance-limit problem."
+          }
+        ]
+      }
+    ],
+    "summary": "Root cause confirmed: the orders-db credential was rotated but the API tasks kept the previous secret version, so the server rejects every connection with FATAL 28P01. The instance-down hypothesis is refuted by the server-side nature of the error. One planned probe (authorized read on the orders database) failed with the same verbatim authentication error and is recorded as coverage data, not evidence."
+  }
+}

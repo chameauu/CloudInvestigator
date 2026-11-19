@@ -165,6 +165,15 @@
         "detail": "Bucket policy version 3 added an explicit Deny for s3:GetObject on principal role/qa-ingest-uploader, applied at 09:01:59Z by role/ops-automation. Every upload task since 09:14:02Z fails with AccessDenied; the deny decision and the originating policy statement are both visible in the QA audit DB.",
         "cause_token": "AccessDenied",
         "confidence": "high",
+        "resource": {
+          "provider": "aws",
+          "region": "eu-west-1",
+          "service": "s3",
+          "resource_type": "bucket",
+          "resource_id": "arn:aws:s3:::qa-data-lake",
+          "name": "qa-data-lake",
+          "tags": { "env": "qa", "owner": "data-platform" }
+        },
         "evidence_ids": [
           "ev:s3_access_denied:sql:1",
           "ev:s3_access_denied:sql:2",

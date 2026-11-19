@@ -1,0 +1,8 @@
+{
+  "scenario": "insufficient_evidence",
+  "source": "cloudwatch_logs",
+  "description": "Replay of an empty CloudWatch Logs read: the window contains no events matching the catalog filter. This is NO_DATA, not an error — the probe must report an empty result, and the report must abstain.",
+  "log_group": "/aws/ecs/public-api",
+  "filter_pattern": "ERROR",
+  "events": []
+}

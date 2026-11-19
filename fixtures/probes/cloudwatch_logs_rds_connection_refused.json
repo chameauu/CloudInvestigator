@@ -1,0 +1,19 @@
+{
+  "scenario": "rds_connection_refused",
+  "source": "cloudwatch_logs",
+  "description": "Replay of CloudWatch Logs filter_log_events for the orders DB after a credential rotation. Both events carry the server-side FATAL term the catalog filter selects, and both are verbatim authentication rejections (the database is up and answering).",
+  "log_group": "/aws/rds/instance/orders-db/postgresql",
+  "filter_pattern": "FATAL",
+  "events": [
+    {
+      "event_id": "cwl-4412900117841",
+      "ts": "2026-11-19T09:12:44.117Z",
+      "message": "2026-11-19T09:12:44.117Z FATAL: password authentication failed for user \"orders_app\" (host=10.0.3.24, database=orders, ssl=on)"
+    },
+    {
+      "event_id": "cwl-4412900182712",
+      "ts": "2026-11-19T09:13:10.902Z",
+      "message": "2026-11-19T09:13:10.902Z FATAL orders_api: database authentication failed (user=orders_app) — retry 3/5, backing off 8s"
+    }
+  ]
+}

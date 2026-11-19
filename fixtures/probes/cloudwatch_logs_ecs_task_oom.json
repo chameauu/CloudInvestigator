@@ -1,0 +1,19 @@
+{
+  "scenario": "ecs_task_oom",
+  "source": "cloudwatch_logs",
+  "description": "Replay of the batch-worker log group for the OOM scenario. Both events carry the Killed term the catalog filter selects and show the container pinned at its 2048 MiB limit.",
+  "log_group": "/aws/ecs/batch-worker",
+  "filter_pattern": "Killed",
+  "events": [
+    {
+      "event_id": "cwl-6614001273301",
+      "ts": "2026-11-19T02:14:07.310Z",
+      "message": "2026-11-19T02:14:07.310Z Killed batch-worker task 7f3c2a91 (exit code 137, OOMKilled) — memory 2048/2048 MiB at 02:14:07Z"
+    },
+    {
+      "event_id": "cwl-6614001391207",
+      "ts": "2026-11-19T02:21:55.884Z",
+      "message": "2026-11-19T02:21:55.884Z Killed batch-worker task 7f3c2a91 retry 4/5 — OOMKilled again at the same 2048 MiB ceiling (batch size 5000)"
+    }
+  ]
+}

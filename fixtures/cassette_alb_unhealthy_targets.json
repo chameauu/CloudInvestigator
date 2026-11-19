@@ -1,0 +1,88 @@
+{
+  "scenario_id": "alb_unhealthy_targets",
+  "question": "The public API started returning 5xx for most requests after this morning's deploy. What is failing?",
+  "time_range": {
+    "start": "2026-11-19T10:00:00Z",
+    "end": "2026-11-19T14:00:00Z",
+    "label": "incident window"
+  },
+  "demo_script": {
+    "service": "public-api",
+    "plan": {
+      "sources": ["cloudwatch_logs"],
+      "rationale": "5xx spike on the ALB with a fresh deploy in the window: read the ECS service log group for the health-check and load-balancer error events. The catalog lists no authorized database for this service, so logs are the only useful source."
+    },
+    "resources": [
+      {
+        "provider": "aws",
+        "region": "eu-west-1",
+        "service": "alb",
+        "resource_type": "load_balancer",
+        "resource_id": "arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/app/public-api/abc123",
+        "name": "public-api",
+        "tags": { "env": "qa", "owner": "platform", "tier": "edge" }
+      }
+    ],
+    "hypotheses": [
+      {
+        "rank": 1,
+        "statement": "Deploy v42 of the api service introduced a failing /healthz endpoint: the new tasks answer 503, the ALB marks them unhealthy, and the remaining healthy target cannot absorb the traffic.",
+        "status": "confirmed",
+        "arguments_for": [
+          "Three consecutive health probes to 10.0.4.17:8080 return 503 on /healthz, which is the ALB's deregistration threshold",
+          "The 5xx burst starts inside the v42 rollout window and the target group reports 1/3 healthy targets"
+        ],
+        "arguments_against": [],
+        "evidence_ids": [
+          "ev:alb_unhealthy_targets:cloudwatch_logs:1",
+          "ev:alb_unhealthy_targets:cloudwatch_logs:2"
+        ]
+      },
+      {
+        "rank": 2,
+        "statement": "The ALB security group or a listener rule blocks traffic to the targets, so requests never reach the application.",
+        "status": "refuted",
+        "arguments_for": [
+          "Clients see 5xx rather than a successful response"
+        ],
+        "arguments_against": [
+          "The ALB reached the targets and received application-level 503s on /healthz — blocked traffic would surface as timeouts or connection resets, not 503 responses"
+        ],
+        "evidence_ids": ["ev:alb_unhealthy_targets:cloudwatch_logs:1"]
+      }
+    ],
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Task revision v42 fails health checks, leaving the target group unhealthy",
+        "detail": "After the v42 rollout, every new task returns 503 on /healthz. The ALB deregistered the targets after three consecutive failures, leaving 1/3 healthy, and 5xx responses rose to 412 in five minutes. Traffic reaches the targets (the ALB receives 503s), so the fault is the new revision, not the network path.",
+        "resource": {
+          "provider": "aws",
+          "region": "eu-west-1",
+          "service": "alb",
+          "resource_type": "load_balancer",
+          "resource_id": "arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/app/public-api/abc123",
+          "name": "public-api",
+          "tags": { "env": "qa", "owner": "platform", "tier": "edge" }
+        },
+        "cause_token": "TargetHealthDegraded",
+        "confidence": "high",
+        "evidence_ids": [
+          "ev:alb_unhealthy_targets:cloudwatch_logs:1",
+          "ev:alb_unhealthy_targets:cloudwatch_logs:2"
+        ],
+        "recommendation": "Roll the api service back from task definition v42 to the last revision that passed /healthz (v41), then confirm 3/3 targets report healthy and the 5xx rate returns to baseline.",
+        "citations": [
+          {
+            "chunk_id": "rb:alb-5xx-target-health:alb-5xx-target-health-diagnosis-steps:0d7be431",
+            "source": "runbooks/alb-5xx-target-health.md",
+            "section": "ALB 5xx — diagnosis steps",
+            "score": 0.88,
+            "excerpt": "When 5xx responses appear right after a deployment, compare the target group's healthy-host count with the pre-deploy baseline; a revision that fails its health check is deregistered and the remaining targets are overloaded."
+          }
+        ]
+      }
+    ],
+    "summary": "Root cause confirmed: task revision v42 fails the /healthz check, so the ALB deregisters the new targets and the surviving target is overloaded into 5xx. The security-group hypothesis is refuted because the ALB demonstrably reaches the targets and receives application-level 503s."
+  }
+}
