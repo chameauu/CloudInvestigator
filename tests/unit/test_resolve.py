@@ -35,7 +35,7 @@ def test_demo_service_resolves_both_probes_with_scope():
     assert names == ["cloudwatch_logs", "sql"]
     cw = res.available[0]
     assert cw.params["log_groups"] == ["/aws/lambda/qa-ingest-uploader"]
-    assert cw.params["filter_pattern"] == "AccessDenied"
+    assert cw.params["filter_pattern"] == "qa-data-lake"
     sql = res.available[1]
     assert sql.params["databases"] == ["qa_audit"]
     # service resources travel with every available source

@@ -39,6 +39,9 @@ jobs:
       - name: End-to-end smoke (recorded cassette, no credentials, no keys)
         run: uv run python scripts/smoke.py
 
+      - name: Eval harness (golden replays — accuracy, citations, determinism)
+        run: uv run python scripts/run_evals.py
+
   integration:
     name: Integration gate (Postgres + pgvector)
     runs-on: ubuntu-latest

@@ -2,7 +2,7 @@
 # Stack targets drive the local compose Postgres + pgvector; test targets are
 # offline (unit + contract) vs. stack-dependent (integration).
 
-.PHONY: install up down reset seed run serve test test-integration verify
+.PHONY: install up down reset seed run serve eval test test-integration verify
 
 install:
 	uv sync
@@ -39,6 +39,11 @@ run:
 serve:
 	uv run uvicorn cloud_investigator.api.main:app --reload
 
+# Replay every golden scenario twice, score the reports, assert determinism
+# and the absence of forbidden (injected) claims. Fully offline.
+eval:
+	uv run python scripts/run_evals.py
+
 # Offline tests only: unit + contract. No network, no containers, DB up or down.
 test:
 	uv run pytest tests/unit tests/contract -q
@@ -48,8 +53,9 @@ test:
 test-integration:
 	uv run pytest tests/integration -m integration -q
 
-# Full local gate: lint, offline tests, end-to-end smoke.
+# Full local gate: lint, offline tests, end-to-end smoke, eval harness.
 verify:
 	uv run ruff check src scripts tests
 	make test
 	uv run python scripts/smoke.py
+	uv run python scripts/run_evals.py

@@ -218,6 +218,7 @@ Test-driven development is mandatory.
 | Integration | `tests/integration/` | Marked, requires the running stack |
 | Contract | `tests/contract/` | Asserts infrastructure, config, and asset invariants |
 | End-to-end | `scripts/smoke.py` | Exercises the documented user path (cassette → report) |
+| Eval | `scripts/run_evals.py` | Golden replays: accuracy, citation validity, determinism |
 
 Rules:
 
@@ -318,7 +319,8 @@ These commands are the supported interface. Keep them working and keep them docu
 | `make run` | Execute the end-to-end pipeline offline (`scripts/smoke.py`) |
 | `make test` | Unit tests |
 | `make test-integration` | Tests against the running stack |
-| `make verify` | Lint, unit tests, config validation |
+| `make eval` | Replay golden scenarios twice — score accuracy, evidence validity, determinism |
+| `make verify` | Lint, unit tests, end-to-end smoke, eval harness |
 
 Direct commands invoked by the tooling and CI:
 
@@ -333,8 +335,10 @@ uv run python scripts/smoke.py
 The commands above are enforced by automation, not just documented:
 
 - **CI pipeline — `.github/workflows/ci.yml` (GitHub Actions).** Runs on every push and
-  pull request, in order: `uv sync --frozen`, `ruff check`, unit tests (offline), and
-  `scripts/smoke.py` (cassette end-to-end). The integration suite runs as a separate job
+  pull request, in order: `uv sync --frozen`, `ruff check`, format check, unit and
+  contract tests (offline), `scripts/smoke.py` (cassette end-to-end), and the eval harness
+  (`scripts/run_evals.py`: golden replays scored for accuracy, evidence validity and
+  determinism). The integration suite runs as a separate job
   against a Postgres + pgvector service container and fails — never skips — when the
   database is unreachable. CI is keyless by construction: cassettes and fake embeddings
   mean no cloud credentials and no LLM keys ever enter the pipeline. From the moment the
