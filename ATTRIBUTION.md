@@ -76,6 +76,13 @@ design patterns. No code was copied from any of them.
   two ranked candidates, supporting and contradicting evidence, deterministic
   fallback). Patterns only; its license is not code-compatible with this
   project and no Flawless code was used.
+- **mezmo/aura** — the recommendation shape: name the culprit version when the
+  evidence identifies one, give an explicit rollback path, and state the steps
+  that prove recovery. Reimplemented in `engine/recommend.py`.
+- **SREGym** — the evaluation style: relay recorded incidents, score each
+  report for correct component, correct fault class, share of claims backed by
+  a real evidence id, and abstention where evidence is missing. Reimplemented
+  in `eval/` and `scripts/run_evals.py`.
 
 ## 3. Provenance caveat
 
