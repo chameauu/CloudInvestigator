@@ -43,6 +43,7 @@ class InvestigationState(TypedDict, total=False):
     demo_mode: bool
     scenario: str  # fixture scenario_id when demo_mode
     demo_script: dict  # canned planner/analyst outputs for FakeLLM (offline)
+    routing_note: str  # why the question resolved to this scenario (or "")
 
     # planning
     plan: ProbePlan | None

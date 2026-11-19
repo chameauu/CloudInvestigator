@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from ..engine.graph import DEFAULT_SCENARIO, run_streamed
+from ..engine.graph import run_streamed
 from ..sources.fake import available_scenarios
 
 app = FastAPI(title="CloudInvestigator")
@@ -26,7 +26,9 @@ _STORE: dict[str, dict] = {}
 
 class InvestigateRequest(BaseModel):
     question: str = ""
-    scenario: str = DEFAULT_SCENARIO
+    # Empty = resolve the service from the question. No silent default: an
+    # unresolvable question returns an abstaining report with the reason.
+    scenario: str = ""
     demo_mode: bool = True
 
 

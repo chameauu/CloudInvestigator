@@ -50,12 +50,13 @@ from ..contracts import (
 )
 from ..llm.fake import FakeLLM
 from ..sources.base import ProbeContext
-from ..sources.fake import load_cassette
+from ..sources.fake import available_scenarios, load_cassette
 from ..sources.probes import make_probe, registered_probes
 from .diagnose import Diagnoser, DiagnoseResult, RootCauseCandidate, diagnose, to_hypotheses
 from .elimination import eliminate as eliminate_candidates
 from .recommend import build_plans, render
 from .resolve import IntegrationResolution, resolve_integrations
+from .routing import resolve_scenario
 from .state import InvestigationState, ProbeBranch
 
 DEFAULT_SCENARIO = "s3_access_denied"
@@ -110,16 +111,57 @@ def _catalog(path: str) -> Catalog:
 # --------------------------------------------------------------------- nodes
 
 
+def _question_key(question: str) -> str:
+    from hashlib import sha256
+
+    return sha256(question.strip().lower().encode("utf-8")).hexdigest()[:8]
+
+
+@lru_cache(maxsize=1)
+def _cassettes() -> dict[str, dict]:
+    """All recorded scenarios, loaded once — the routing vocabulary."""
+    return {name: load_cassette(name) for name in available_scenarios()}
+
+
 def intake(state: InvestigationState) -> dict:
-    """Normalize the NL question. Demo mode: pull the pinned cassette script."""
+    """Resolve the question to a recorded scenario — or abstain.
+
+    An explicit ``scenario`` wins (demo, tests, API callers that know the
+    recording). Otherwise the question itself must name a known service,
+    resource, or fault: there is no silent default. An unresolvable question
+    abstains with the reason instead of answering a canned scenario nobody
+    asked about.
+    """
     question = state.get("question", "")
     scenario = state.get("scenario", "")
     demo_mode = bool(state.get("demo_mode", True))
+    routing_note = ""
 
     time_range: TimeRange | None = None
     demo_script: dict = {}
     service = ""
-    if demo_mode and scenario:
+    if demo_mode:
+        if not scenario:
+            match = resolve_scenario(question, _cassettes())
+            if match.scenario is None:
+                reason = f"cannot resolve the question to an authorized service: {match.reason}"
+                return {
+                    "investigation_id": f"inv:adhoc:{_question_key(question)}",
+                    "question": question,
+                    "service": "",
+                    "time_range": None,
+                    "scenario": "",
+                    "demo_mode": demo_mode,
+                    "demo_script": {},
+                    "abstain_reason": reason,
+                    "coverage": {
+                        "sources_planned": [],
+                        "skipped": [],
+                        "failures": [f"routing: {match.reason}"],
+                    },
+                }
+            scenario = match.scenario
+            routing_note = match.reason
         cassette = load_cassette(scenario)
         time_range = TimeRange(**cassette["time_range"])
         demo_script = cassette["demo_script"]
@@ -127,22 +169,41 @@ def intake(state: InvestigationState) -> dict:
         question = question or cassette.get("question", "")
 
     return {
-        "investigation_id": f"inv:{scenario or 'adhoc'}",
+        "investigation_id": f"inv:{scenario}"
+        if scenario
+        else f"inv:adhoc:{_question_key(question)}",
         "question": question,
         "service": service,
         "time_range": time_range,
         "scenario": scenario,
         "demo_mode": demo_mode,
         "demo_script": demo_script,
+        "routing_note": routing_note,
     }
 
 
 def plan(state: InvestigationState) -> dict:
-    """FakeLLM picks which sources to probe (deterministic in demo mode)."""
+    """FakeLLM picks which sources to probe (deterministic in demo mode).
+
+    An unresolved question plans no probes: probing blind would be a guess
+    dressed as an investigation.
+    """
+    if state.get("abstain_reason"):
+        return {
+            "plan": ProbePlan(
+                sources=[],
+                time_range=state.get("time_range"),
+                resource_targets=[],
+                rationale="the question did not resolve to an authorized service",
+            )
+        }
     llm = FakeLLM(state.get("demo_script") or {})
     probe_plan = llm.plan(
         state.get("question", ""), state.get("service", ""), state.get("time_range")
     )
+    note = state.get("routing_note") or ""
+    if note:
+        probe_plan.rationale = f"{probe_plan.rationale} (routing: {note})".strip()
     return {"plan": probe_plan}
 
 
@@ -154,6 +215,10 @@ def gate(state: InvestigationState) -> dict:
     instead of probing blind.
     """
     planned = list(state["plan"].sources) if state.get("plan") else []
+    if state.get("abstain_reason"):
+        coverage = dict(state.get("coverage") or {})
+        coverage["sources_planned"] = planned
+        return {"coverage": coverage}
 
     try:
         settings = load_settings()
@@ -175,10 +240,9 @@ def gate(state: InvestigationState) -> dict:
         catalog=catalog,
         available_sources=registered_probes(),
     )
-    coverage = {
-        "sources_planned": planned,
-        "skipped": [u.name for u in resolution.unavailable],
-    }
+    coverage = dict(state.get("coverage") or {})
+    coverage["sources_planned"] = planned
+    coverage["skipped"] = [u.name for u in resolution.unavailable]
     return {
         "integration": resolution.model_dump(),
         "coverage": coverage,
@@ -539,15 +603,13 @@ def get_graph():
 # ------------------------------------------------------------------- runners
 
 
-def initial_state(
-    question: str, scenario: str = DEFAULT_SCENARIO, demo_mode: bool = True
-) -> InvestigationState:
+def initial_state(question: str, scenario: str = "", demo_mode: bool = True) -> InvestigationState:
     return {"question": question, "scenario": scenario, "demo_mode": demo_mode}
 
 
 def run_investigation(
     question: str = "",
-    scenario: str = DEFAULT_SCENARIO,
+    scenario: str = "",
     *,
     persist: bool = False,
     checkpointer: BaseCheckpointSaver | None = None,
@@ -607,9 +669,7 @@ def _persist_run(final: dict, report: InvestigationReport) -> None:
     persist_investigation(report, dict(final.get("coverage") or {}))
 
 
-def run_streamed(
-    question: str = "", scenario: str = DEFAULT_SCENARIO
-) -> tuple[InvestigationReport, list[dict]]:
+def run_streamed(question: str = "", scenario: str = "") -> tuple[InvestigationReport, list[dict]]:
     """One offline run; returns (typed report, node-by-node event log).
 
     Each event is {'node': <name>, 'payload': <short summary>} — the shape the
