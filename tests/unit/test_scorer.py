@@ -13,6 +13,7 @@ from cloud_investigator.contracts import (
     ResourceRef,
 )
 from cloud_investigator.eval.golden import Expectation, GoldenScenario, load_golden
+from cloud_investigator.eval.harness import build_verdict, split_scenarios
 from cloud_investigator.eval.replay import report_fingerprint, same_report
 from cloud_investigator.eval.scorer import score_report, summarize
 
@@ -259,3 +260,122 @@ def test_load_golden_parses_the_repo_file():
     absten = next(s for s in scenarios if s.name == "insufficient_evidence")
     assert absten.expectation.abstain is True
     assert all(s.question for s in scenarios)
+
+
+# -------------------------------------------------------------- held-out split
+
+
+def test_held_out_parses_and_defaults_to_false(tmp_path):
+    path = tmp_path / "golden.yaml"
+    path.write_text(
+        """
+scenarios:
+  - name: scored
+    question: why?
+    component: alb
+    fault_class: TargetHealthDegraded
+  - name: held
+    question: why?
+    component: rds
+    fault_class: ConnectionPoolExhausted
+    held_out: true
+""",
+        encoding="utf-8",
+    )
+    scenarios = load_golden(path)
+    assert scenarios[0].held_out is False
+    assert scenarios[1].held_out is True
+
+
+def test_shipped_golden_file_has_at_least_two_held_out_scenarios():
+    path = Path(__file__).resolve().parents[2] / "evals" / "golden.yaml"
+    scenarios = load_golden(path)
+    by_name = {scenario.name: scenario for scenario in scenarios}
+
+    held_out = [scenario for scenario in scenarios if scenario.held_out]
+    assert len(held_out) >= 2
+
+    exhaustion = by_name["rds_connection_exhaustion"]
+    assert exhaustion.held_out is True
+    assert exhaustion.expectation.component == "rds"
+    assert exhaustion.expectation.fault_class == "ConnectionPoolExhausted"
+
+    port_mismatch = by_name["alb_target_port_mismatch"]
+    assert port_mismatch.held_out is True
+    assert port_mismatch.expectation.component == "alb"
+    assert port_mismatch.expectation.fault_class == "TargetPortMismatch"
+
+    headline_names = {
+        "s3_access_denied",
+        "rds_connection_refused",
+        "alb_unhealthy_targets",
+        "ecs_task_oom",
+        "poisoned_logs",
+        "insufficient_evidence",
+    }
+    assert all(not by_name[name].held_out for name in headline_names)
+
+
+def test_split_scenarios_keeps_held_out_out_of_the_headline():
+    scenarios = [
+        GoldenScenario(name="headline", question="q"),
+        GoldenScenario(name="held", question="q", held_out=True),
+    ]
+    split = split_scenarios(scenarios)
+    assert [scenario.name for scenario in split.headline] == ["headline"]
+    assert [scenario.name for scenario in split.held_out] == ["held"]
+
+
+def test_headline_metrics_exclude_held_out_scenarios():
+    scenarios = [
+        GoldenScenario(
+            name="headline",
+            question="q",
+            expectation=Expectation(component="alb", fault_class="TargetHealthDegraded"),
+        ),
+        GoldenScenario(
+            name="held",
+            question="q",
+            expectation=Expectation(component="rds", fault_class="ConnectionPoolExhausted"),
+            held_out=True,
+        ),
+    ]
+    split = split_scenarios(scenarios)
+    reports = {
+        "headline": _report(findings=[_finding()]),
+        "held": _report(findings=[_finding(service="ecs")]),
+    }
+    scores = {
+        scenario.name: score_report(scenario.name, reports[scenario.name], scenario.expectation)
+        for scenario in scenarios
+    }
+
+    summary = summarize([scores[scenario.name] for scenario in split.headline], determinism_ok=True)
+    assert summary.component_accuracy == 1.0
+    assert summary.fault_class_accuracy == 1.0
+    assert summary.scores == [scores["headline"]]
+
+    verdict = build_verdict(
+        [scores[scenario.name] for scenario in split.headline],
+        [scores[scenario.name] for scenario in split.held_out],
+        headline_deterministic=True,
+        held_out_deterministic=True,
+    )
+    assert not verdict.ok
+    assert verdict.headline_failures == ()
+    assert verdict.held_out_failures == ("held",)
+    assert "held-out: held" in verdict.message
+
+
+def test_verdict_reports_the_held_out_count_when_everything_passes():
+    expectation = Expectation(component="alb", fault_class="TargetHealthDegraded")
+    headline = score_report("headline", _report(findings=[_finding()]), expectation)
+    held_out = score_report("held", _report(findings=[_finding()]), expectation)
+    verdict = build_verdict(
+        [headline],
+        [held_out],
+        headline_deterministic=True,
+        held_out_deterministic=True,
+    )
+    assert verdict.ok
+    assert verdict.message.endswith("held-out: 1/1")

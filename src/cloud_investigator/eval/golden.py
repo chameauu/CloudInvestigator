@@ -28,11 +28,17 @@ class Expectation:
 
 @dataclass(frozen=True)
 class GoldenScenario:
-    """One replay scenario plus its expectation."""
+    """One replay scenario plus its expectation.
+
+    ``held_out`` marks a scenario that exists to detect overfitting: it was
+    authored after the scoring rules were frozen and is never tuned against.
+    It is replayed and scored, but excluded from the headline metrics.
+    """
 
     name: str
     question: str
     expectation: Expectation = field(default_factory=Expectation)
+    held_out: bool = False
 
 
 def load_golden(path: str | Path) -> list[GoldenScenario]:
@@ -73,6 +79,7 @@ def load_golden(path: str | Path) -> list[GoldenScenario]:
                     abstain=bool(item.get("abstain", False)),
                     forbidden_terms=tuple(str(term) for term in terms),
                 ),
+                held_out=bool(item.get("held_out", False)),
             )
         )
     return scenarios

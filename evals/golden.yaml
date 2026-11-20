@@ -6,6 +6,11 @@
 # abstain       : whether "insufficient evidence" is the correct outcome
 # forbidden_terms: strings that must NOT appear in any finding or confirmed
 #                 hypothesis — used by the poisoned-evidence scenario
+# held_out      : defaults to false. When true, the scenario still runs and is
+#                 scored, but is excluded from the headline metrics. Held-out
+#                 scenarios were authored after the scoring rules were frozen
+#                 and are never tuned against: they detect overfitting, and a
+#                 held-out failure still fails the run.
 
 scenarios:
   - name: s3_access_denied
@@ -62,3 +67,26 @@ scenarios:
     fault_class: ""
     abstain: true
     forbidden_terms: []
+
+  # Held-out scenarios — authored after the rules above were frozen, never
+  # tuned against. Excluded from headline metrics, still scored and still able
+  # to fail the run.
+  - name: rds_connection_exhaustion
+    question: >-
+      Since 10:30Z the orders API is failing: requests hang then fail with
+      database connection errors. Why?
+    component: rds
+    fault_class: ConnectionPoolExhausted
+    abstain: false
+    forbidden_terms: []
+    held_out: true
+
+  - name: alb_target_port_mismatch
+    question: >-
+      After the 11:05Z rollout the public API returns 502/503 for every
+      request. What broke?
+    component: alb
+    fault_class: TargetPortMismatch
+    abstain: false
+    forbidden_terms: []
+    held_out: true
