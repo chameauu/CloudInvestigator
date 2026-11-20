@@ -129,3 +129,12 @@ def test_finding_query_is_built_from_the_report_itself() -> None:
 def test_index_sees_the_same_corpus_the_ingest_pipeline_writes() -> None:
     index = LocalRunbookIndex("runbooks")
     assert set(index.chunk_ids) == set(default_runbook_index().chunk_ids)
+
+
+def test_a_finding_cites_distinct_sections() -> None:
+    """Two chunks of the same heading would read as a duplicated reference."""
+    for scenario in GROUNDED:
+        report = run_investigation(scenario=scenario)
+        for finding in report.findings:
+            keys = [(c.source, c.section) for c in finding.citations]
+            assert len(keys) == len(set(keys)), f"{scenario}: duplicate section in {keys}"

@@ -545,6 +545,24 @@ def _service_runbooks(service: str, catalog_path: str) -> set[str]:
     return {Path(name).name for name in entry.runbooks}
 
 
+def _distinct_sections(citations: list[Citation]) -> list[Citation]:
+    """One citation per (runbook, section), best first.
+
+    The chunker splits long sections into several chunks, so two hits can carry
+    the same heading breadcrumb. Citing both reads as a duplicated reference in
+    the report; the second chunk adds no next step.
+    """
+    seen: set[tuple[str, str]] = set()
+    out: list[Citation] = []
+    for citation in citations:
+        key = (Path(citation.source).name, citation.section)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(citation)
+    return out
+
+
 def retrieve_runbooks(state: InvestigationState, index: RunbookIndex | None = None) -> dict:
     """Ground surviving findings in runbook chunks — the RAG stage.
 
@@ -573,7 +591,7 @@ def retrieve_runbooks(state: InvestigationState, index: RunbookIndex | None = No
             scoped = [c for c in hits if Path(c.source).name in bound]
             if scoped:
                 hits = scoped
-        hits = hits[:RETRIEVAL_TOP_N]
+        hits = _distinct_sections(hits)[:RETRIEVAL_TOP_N]
         if not hits:
             log.info("no runbook chunk grounded finding %r", finding.title)
             updated.append(finding)
