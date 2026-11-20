@@ -17,6 +17,7 @@ from cloud_investigator.retrieval.config import retrieval_config
 from cloud_investigator.retrieval.embeddings import FakeEmbedder
 from cloud_investigator.retrieval.ingest import RunbookIngestor
 from cloud_investigator.retrieval.retriever import RunbookRetriever
+from cloud_investigator.store.db import apply_migrations, default_migrations_dir
 
 pytestmark = pytest.mark.integration
 
@@ -32,6 +33,10 @@ def ingested(db_up):
     settings = config.load_settings()
     conn = db_up()
     try:
+        # This module may run first against a freshly reset database, so it
+        # applies the (idempotent) migrations itself instead of depending on
+        # another module's fixture having run.
+        apply_migrations(conn, default_migrations_dir())
         ingestor = RunbookIngestor(
             conn,
             embedder=FakeEmbedder(dim=settings.embedding_dim),

@@ -61,8 +61,12 @@ def migrated() -> list[str]:
 
 @pytest.fixture()
 def clean_investigation(migrated) -> str:
-    """The demo scenario's investigation id, wiped before each test."""
-    inv_id = f"inv:{DEFAULT_SCENARIO}"
+    """A pinned investigation id owned by this suite, wiped before each test.
+
+    Engine runs mint run-scoped ids; tests that must address ledger rows pin
+    their own id explicitly (and keep it out of the drill's namespace).
+    """
+    inv_id = f"inv:test:{DEFAULT_SCENARIO}"
     delete_investigation(inv_id)
     return inv_id
 
@@ -79,7 +83,7 @@ def _scenario_fixtures() -> tuple[dict, TimeRange, list[ResourceRef]]:
 
 
 def _probe_branches(
-    time_range: TimeRange, resources: list[ResourceRef]
+    time_range: TimeRange, resources: list[ResourceRef], inv_id: str
 ) -> list[tuple[str, object]]:
     """One ProbeResult per resolved source — exactly what probe_source emits."""
     settings = load_settings()
@@ -95,7 +99,7 @@ def _probe_branches(
     branches = []
     for resolved in resolution.available:
         ctx = ProbeContext(
-            investigation_id=f"inv:{DEFAULT_SCENARIO}",
+            investigation_id=inv_id,
             source=resolved.name,
             kind=resolved.kind,
             time_range=time_range,
@@ -130,10 +134,10 @@ def test_full_report_round_trip(clean_investigation: str) -> None:
     assert cassette["scenario_id"] == DEFAULT_SCENARIO
 
     # 1. per-branch write-through, exactly the payload probe_source produces
-    _persist_branches(inv_id, _probe_branches(time_range, resources), time_range)
+    _persist_branches(inv_id, _probe_branches(time_range, resources, inv_id), time_range)
 
     # 2. the finished report for the same scenario, persisted like the engine does
-    report = run_investigation(scenario=DEFAULT_SCENARIO)
+    report = run_investigation(scenario=DEFAULT_SCENARIO, investigation_id=inv_id)
     persist_investigation(report, report.coverage.model_dump())
 
     # 3. round trip
@@ -152,8 +156,8 @@ def test_persist_twice_keeps_row_counts(clean_investigation: str) -> None:
     """Idempotency: persisting the same run twice must not duplicate rows."""
     inv_id = clean_investigation
     _cassette, time_range, resources = _scenario_fixtures()
-    branches = _probe_branches(time_range, resources)
-    report = run_investigation(scenario=DEFAULT_SCENARIO)
+    branches = _probe_branches(time_range, resources, inv_id)
+    report = run_investigation(scenario=DEFAULT_SCENARIO, investigation_id=inv_id)
     coverage = report.coverage.model_dump()
 
     for _ in range(2):
@@ -175,7 +179,9 @@ def test_persist_twice_keeps_row_counts(clean_investigation: str) -> None:
 
 def test_engine_write_through_persists_the_ledger(clean_investigation: str) -> None:
     """run_investigation(persist=True) alone produces the same ledger + report."""
-    report = run_investigation(scenario=DEFAULT_SCENARIO, persist=True)
+    report = run_investigation(
+        scenario=DEFAULT_SCENARIO, persist=True, investigation_id=clean_investigation
+    )
 
     counts = ledger_counts(report.investigation_id)
     assert counts["evidence"] == len(report.evidence), counts
@@ -185,6 +191,27 @@ def test_engine_write_through_persists_the_ledger(clean_investigation: str) -> N
     loaded = load_report(report.investigation_id)
     for field in InvestigationReport.model_fields:
         assert getattr(loaded, field) == getattr(report, field), f"field {field!r} mismatch"
+
+
+def test_two_runs_get_distinct_investigation_ids(clean_investigation: str) -> None:
+    """Run-scoped ids: re-running a scenario yields two independent ledgers.
+
+    Without this, a second run would overwrite (or worse, merge into) the first
+    run's audit trail — one scenario, one row per execution.
+    """
+    first = run_investigation(scenario=DEFAULT_SCENARIO, persist=True)
+    second = run_investigation(scenario=DEFAULT_SCENARIO, persist=True)
+
+    try:
+        assert first.investigation_id != second.investigation_id
+        for report in (first, second):
+            counts = ledger_counts(report.investigation_id)
+            assert counts["present"], counts
+            assert counts["evidence"] == len(report.evidence), counts
+            assert counts["hypotheses"] == len(report.hypotheses), counts
+    finally:
+        delete_investigation(first.investigation_id)
+        delete_investigation(second.investigation_id)
 
 
 def test_load_report_missing_investigation_raises_keyerror(migrated) -> None:

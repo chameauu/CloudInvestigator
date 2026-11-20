@@ -2,9 +2,12 @@
 
 Schema decisions (adapted from docs/inspiration-and-blueprint.md §4.2):
 
-- IDs are TEXT, not uuid: the application mints ``inv:{scenario}`` and
-  ``ev:{scenario}:{source}:{seq}``, and a replayed cassette must address the
-  same ledger rows.
+- IDs are TEXT, not uuid: the application mints run-scoped
+  ``inv:{scenario}:{stamp}`` ids (one row per execution, never merged) and
+  scenario-scoped ``ev:{scenario}:{source}:{seq}`` evidence ids, so a replayed
+  cassette always addresses the same evidence rows. Evidence is keyed
+  ``(investigation_id, id)``: the same evidence id belongs to each run
+  separately, so one run's audit trail never blocks or overwrites another's.
 - ``hypotheses.id`` is derived (``{investigation_id}:h{rank:02d}``) and serves
   as the idempotency key; verify may demote/re-rank between attempts, so the
   upsert UPDATES statement/status instead of duplicating rows.
@@ -182,7 +185,7 @@ INSERT INTO evidence (id, investigation_id, source_type, resource_ref, ts_start,
 VALUES (%(id)s, %(investigation_id)s, %(source_type)s, %(resource_ref)s, %(ts_start)s,
         %(ts_end)s, %(excerpt)s, %(detail)s, %(query_executed)s, %(query_hash)s,
         %(tool_call_seq)s)
-ON CONFLICT (id) DO NOTHING
+ON CONFLICT (investigation_id, id) DO NOTHING
 """
 
 _TOOL_CALL_INSERT = """

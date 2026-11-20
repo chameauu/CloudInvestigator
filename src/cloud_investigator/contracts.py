@@ -12,7 +12,7 @@ House rules (derived from the inspiration research, docs/inspiration-and-bluepri
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -142,7 +142,7 @@ class CoverageReport(BaseModel):
 class InvestigationReport(BaseModel):
     investigation_id: str
     question: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     summary: str
     time_range: TimeRange | None = None
     timeline: list[TimelineEvent] = Field(default_factory=list)

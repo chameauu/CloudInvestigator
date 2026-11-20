@@ -29,6 +29,7 @@ reducer collisions on parallel branches — is avoided BY CONSTRUCTION here):
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 
@@ -117,6 +118,20 @@ def _question_key(question: str) -> str:
     return sha256(question.strip().lower().encode("utf-8")).hexdigest()[:8]
 
 
+def _run_stamp() -> str:
+    """Second-precision UTC stamp plus four random hex chars — unique per run."""
+    from uuid import uuid4
+
+    return datetime.now(UTC).strftime("%Y%m%dT%H%M%S") + "z" + uuid4().hex[:4]
+
+
+def _mint_investigation_id(scenario: str, question: str) -> str:
+    """One id per investigation run: re-running a scenario must not overwrite it."""
+    if scenario:
+        return f"inv:{scenario}:{_run_stamp()}"
+    return f"inv:adhoc:{_question_key(question)}:{_run_stamp()}"
+
+
 @lru_cache(maxsize=1)
 def _cassettes() -> dict[str, dict]:
     """All recorded scenarios, loaded once — the routing vocabulary."""
@@ -136,6 +151,9 @@ def intake(state: InvestigationState) -> dict:
     scenario = state.get("scenario", "")
     demo_mode = bool(state.get("demo_mode", True))
     routing_note = ""
+    # An id supplied by the caller (tests, the restart drill) wins; otherwise
+    # every run mints its own, so two investigations never share a ledger row.
+    minted_id = state.get("investigation_id") or ""
 
     time_range: TimeRange | None = None
     demo_script: dict = {}
@@ -146,7 +164,7 @@ def intake(state: InvestigationState) -> dict:
             if match.scenario is None:
                 reason = f"cannot resolve the question to an authorized service: {match.reason}"
                 return {
-                    "investigation_id": f"inv:adhoc:{_question_key(question)}",
+                    "investigation_id": minted_id or _mint_investigation_id("", question),
                     "question": question,
                     "service": "",
                     "time_range": None,
@@ -169,9 +187,7 @@ def intake(state: InvestigationState) -> dict:
         question = question or cassette.get("question", "")
 
     return {
-        "investigation_id": f"inv:{scenario}"
-        if scenario
-        else f"inv:adhoc:{_question_key(question)}",
+        "investigation_id": minted_id or _mint_investigation_id(scenario, question),
         "question": question,
         "service": service,
         "time_range": time_range,
@@ -603,8 +619,22 @@ def get_graph():
 # ------------------------------------------------------------------- runners
 
 
-def initial_state(question: str, scenario: str = "", demo_mode: bool = True) -> InvestigationState:
-    return {"question": question, "scenario": scenario, "demo_mode": demo_mode}
+def initial_state(
+    question: str,
+    scenario: str = "",
+    demo_mode: bool = True,
+    investigation_id: str = "",
+) -> InvestigationState:
+    """Seed state. ``investigation_id`` pins the run identity (tests, drill);
+    empty lets intake mint a fresh one."""
+    state: InvestigationState = {
+        "question": question,
+        "scenario": scenario,
+        "demo_mode": demo_mode,
+    }
+    if investigation_id:
+        state["investigation_id"] = investigation_id
+    return state
 
 
 def run_investigation(
@@ -616,17 +646,20 @@ def run_investigation(
     thread_id: str | None = None,
     interrupt_before: list[str] | None = None,
     resume: bool = False,
+    investigation_id: str | None = None,
 ) -> InvestigationReport:
     """One offline run; returns the typed report.
 
     Default: no database at all — no checkpointer, no persistence (smoke path).
-    With a checkpointer, ``thread_id`` defaults to the investigation id minted
-    by intake (``inv:{scenario}``) so checkpoints survive process restarts;
-    ``resume=True`` continues an interrupted thread from its checkpoint.
-    ``persist=True`` write-throughs the finished run to the Postgres ledger
-    (probe results first, then the report). Interrupted legs (no report yet)
-    are driven at the graph level by the restart drill, not here — this
-    function returns a report or raises.
+    Every run mints its own investigation id (``inv:{scenario}:{stamp}``) unless
+    ``investigation_id`` pins one — two runs of the same scenario are two
+    ledger rows, never an overwrite. With a checkpointer, ``thread_id`` defaults
+    to the scenario-level thread (``inv:{scenario}``) — thread identity is the
+    checkpoint key, not the report id; ``resume=True`` continues an interrupted
+    thread from its checkpoint. ``persist=True`` write-throughs the finished run
+    to the Postgres ledger (probe results first, then the report). Interrupted
+    legs (no report yet) are driven at the graph level by the restart drill, not
+    here — this function returns a report or raises.
     """
     if resume and checkpointer is None:
         raise ValueError("resuming requires a checkpointer")
@@ -634,7 +667,11 @@ def run_investigation(
         app = get_graph()
     else:
         app = build_graph(checkpointer=checkpointer, interrupt_before=interrupt_before)
-    state_in = None if resume else initial_state(question, scenario)
+    state_in = (
+        None
+        if resume
+        else initial_state(question, scenario, investigation_id=investigation_id or "")
+    )
     config = None
     if checkpointer is not None:
         config = {"configurable": {"thread_id": thread_id or f"inv:{scenario or 'adhoc'}"}}

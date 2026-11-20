@@ -118,10 +118,16 @@ curl -s -X POST http://127.0.0.1:8000/api/investigate \
   | head -c 300
 ```
 
-**Expect:** `{"investigation_id":"inv:s3_access_denied", …`.
+**Expect:** `{"investigation_id":"inv:s3_access_denied:<stamp>", …`. The stub
+after the colon makes ids run-scoped: two runs of the same scenario are two
+ledger rows, so the id changes on every POST. Capture it:
 
 ```bash
-curl -N http://127.0.0.1:8000/api/investigate/inv:s3_access_denied/events
+INV=$(curl -s -X POST http://127.0.0.1:8000/api/investigate \
+  -H 'content-type: application/json' \
+  -d '{"question":"Why do uploads fail with AccessDenied?","scenario":"s3_access_denied"}' \
+  | python -c 'import json,sys; print(json.load(sys.stdin)["investigation_id"])')
+curl -N "http://127.0.0.1:8000/api/investigate/$INV/events"
 ```
 
 **Expect:** `data: {"node": "intake", …}`, then `plan`, `gate`, probe events,

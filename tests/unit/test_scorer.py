@@ -229,10 +229,15 @@ def test_summary_with_no_claims_reports_full_evidence_validity():
 # ------------------------------------------------------------------- replay
 
 
-def test_fingerprint_ignores_created_at_but_detects_changes():
+def test_fingerprint_ignores_run_local_fields_but_detects_changes():
     a = _report(findings=[_finding()])
     b = _report(findings=[_finding()])
-    b = b.model_copy(update={"created_at": datetime(2020, 1, 1, tzinfo=UTC)})
+    b = b.model_copy(
+        update={
+            "created_at": datetime(2020, 1, 1, tzinfo=UTC),
+            "investigation_id": "inv:s3_access_denied:20200101T000000z0000",
+        }
+    )
     assert report_fingerprint(a) == report_fingerprint(b)
     assert same_report(a, b)
 

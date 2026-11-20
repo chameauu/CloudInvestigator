@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from cloud_investigator.engine.graph import _cassettes, run_investigation
 from cloud_investigator.engine.routing import MIN_SCORE, resolve_scenario
 
@@ -105,7 +107,7 @@ def test_unresolved_question_produces_an_abstaining_report():
 def test_resolved_question_runs_the_matched_scenario():
     report = run_investigation("Uploads to qa-data-lake fail with AccessDenied since 09:15Z")
     assert report.abstained is False
-    assert report.investigation_id == "inv:s3_access_denied"
+    assert re.fullmatch(r"inv:s3_access_denied:\d{8}T\d{6}z[0-9a-f]{4}", report.investigation_id)
     assert report.findings
 
 

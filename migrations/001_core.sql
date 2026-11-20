@@ -5,8 +5,9 @@
 -- Idempotent by construction: every statement uses IF NOT EXISTS — re-apply is safe.
 --
 -- ID convention (differs from the uuid blueprint on purpose): investigations and
--- evidence ids are the TEXT ids minted by the application (`inv:{scenario}`,
--- `ev:{scenario}:{source}:{seq}`), so a replayed cassette addresses the same rows.
+-- evidence ids are the TEXT ids minted by the application
+-- (`inv:{scenario}:{stamp}`, run-scoped; `ev:{scenario}:{source}:{seq}`,
+-- scenario-scoped), so a replayed cassette addresses the same evidence rows.
 
 CREATE TABLE IF NOT EXISTS services (
   id            text PRIMARY KEY,
@@ -38,7 +39,7 @@ CREATE INDEX IF NOT EXISTS investigations_status_idx ON investigations (status);
 -- column is deliberately plain text (no DB CHECK) so raw payloads are never
 -- silently rejected by storage — an over-long excerpt is a code bug to fix.
 CREATE TABLE IF NOT EXISTS evidence (
-  id                text PRIMARY KEY,
+  id                text NOT NULL,
   investigation_id  text NOT NULL REFERENCES investigations(id) ON DELETE CASCADE,
   source_type       text NOT NULL,
   resource_ref      text,
@@ -48,7 +49,11 @@ CREATE TABLE IF NOT EXISTS evidence (
   detail            jsonb,
   query_executed    text,
   query_hash        text,
-  tool_call_seq     int
+  tool_call_seq     int,
+  -- Evidence ids are scenario-stable (``ev:{scenario}:{source}:{seq}``) so a
+  -- replayed cassette cites the same ids; the ledger scopes them per run, which
+  -- is what lets two executions of one scenario keep separate audit trails.
+  PRIMARY KEY (investigation_id, id)
 );
 CREATE INDEX IF NOT EXISTS evidence_investigation_idx ON evidence (investigation_id);
 

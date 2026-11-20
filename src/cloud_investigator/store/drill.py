@@ -71,7 +71,9 @@ def run_restart_drill(
     settings = settings or load_settings()
     migrations_dir = migrations_dir or default_migrations_dir()
     reasons: list[str] = []
-    investigation_id = f"inv:{scenario}"
+    # Ids are run-scoped (minted per execution), so the drill pins its own:
+    # both legs must write to the same ledger rows to be comparable.
+    investigation_id = f"inv:drill:{scenario}"
     # B is a separate execution of the same scenario: its own thread, shared by
     # the interrupt leg and the resume leg (see module docstring).
     restart_thread = f"{investigation_id}:restart"
@@ -92,7 +94,12 @@ def run_restart_drill(
 
         # ---- Run A: fresh, full, persisted.
         delete_investigation(investigation_id)  # clean slate, ignore absence
-        report_a = run_investigation(scenario=scenario, persist=True, checkpointer=checkpointer)
+        report_a = run_investigation(
+            scenario=scenario,
+            persist=True,
+            checkpointer=checkpointer,
+            investigation_id=investigation_id,
+        )
         counts_a = ledger_counts(investigation_id)
         if counts_a["evidence"] != len(report_a.evidence):
             reasons.append(
@@ -117,7 +124,9 @@ def run_restart_drill(
 
         # ---- Run B: same thread, interrupted at the correlate boundary.
         crashed_app = build_graph(checkpointer=checkpointer, interrupt_before=[INTERRUPT_NODE])
-        partial = crashed_app.invoke(initial_state("", scenario), config=config)
+        partial = crashed_app.invoke(
+            initial_state("", scenario, investigation_id=investigation_id), config=config
+        )
         del crashed_app  # "crash": the process is gone; only Postgres remains.
         if partial.get("report") is not None:
             reasons.append("interrupted leg completed a report — interrupt did not fire")
