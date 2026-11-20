@@ -30,7 +30,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "--import-mode=importlib -q"
 markers = [
     "integration: requires the running compose stack (make up); run via `make test-integration`",
 ]
