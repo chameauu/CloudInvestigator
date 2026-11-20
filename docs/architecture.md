@@ -25,7 +25,6 @@
 │                                    │  CloudWatch Metrics probe           │
 │                                    │  Resource-state probe (describe_*)  │
 │                                    │  SQL probe (read-only triple-guard) │
-│                                    │  Runbook RAG probe (hybrid+cites)   │
 │                                    ▼                                     │
 │              correlate ◄── merge_list reducers (keyed fan-in)            │
 │                  │                                                      │
@@ -33,6 +32,8 @@
 │                  │                                                      │
 │              verify  (deterministic citation-ID check, reject-and-retry   │
 │                      once, then demote to unverified hypothesis)          │
+│                  │                                                      │
+│              retrieve (RAG: service-scoped runbook chunks → citations)    │
 │                  │                                                      │
 │              report → typed InvestigationReport                          │
 │                                                                          │
@@ -59,13 +60,13 @@
 
 **L1 — Serving (FastAPI).** `POST /api/investigate` validates the request and runs the graph; `GET /api/investigate/{id}/events` streams node events (SSE) then the report; an inline HTML page demos it. Event shapes are stable — live streaming later swaps the internals without touching clients.
 
-**L2 — Orchestration (LangGraph).** One `StateGraph`, eight node kinds. `plan` produces a `ProbePlan` (which sources, which resources, what time window). `gate` short-circuits on noise (nothing to probe → abstain early). `Send(probe_source, ProbeBranch)` fans out **one branch per planned source** in parallel; each branch writes only evidence / tool_calls / timeline / citations, merged back by `merge_list` reducers (keyed fan-in prevents `Send()` collisions). `correlate` normalizes and dedups evidence; `hypothesize` demands **≥2 competing candidates**; `verify` is pure code; `report` assembles the typed report with an honest `CoverageReport`.
+**L2 — Orchestration (LangGraph).** One `StateGraph`, nine node kinds. `plan` produces a `ProbePlan` (which sources, which resources, what time window). `gate` short-circuits on noise (nothing to probe → abstain early). `Send(probe_source, ProbeBranch)` fans out **one branch per planned source** in parallel; each branch writes only evidence / tool_calls / timeline / citations, merged back by `merge_list` reducers (keyed fan-in prevents `Send()` collisions). `correlate` normalizes and dedups evidence; `hypothesize` demands **≥2 competing candidates**; `verify` is pure code; `retrieve` grounds the findings that survived verification in runbook chunks; `report` assembles the typed report with an honest `CoverageReport`.
 
 **L3 — Contracts (the law).** Pydantic models at every node boundary — no free-text handoffs. Three rules are enforced structurally: (1) **evidence IDs are minted only by tools** (`ev:{investigation}:{source}:{seq}`), LLM output can only reference them; (2) a causal claim whose citation doesn't resolve is demoted to an unverified Hypothesis, never a Finding; (3) every query is windowed (`TimeRange`, default 24h) and capped.
 
 **L4 — Probe layer (the read-only chokepoint).** One auditable `call()` seam per provider (HolmesGPT-style `StructuredToolResult` envelope). Before any client is created, `assert_read_only()` checks a fail-closed prefix allowlist (`describe/list/get/query/search/filter/head`…) and rejects write verbs — a prompt-injected "delete" becomes `ToolCallRecord(status="skipped")` with a reason, never an exception. Every result: capped excerpts (2 000 chars), default row/log limits, explicit truncation markers, scope echo, **verbatim upstream errors** (`status="error"`), NO_DATA ≠ ERROR. SQL adds the **triple guard**: statement must be `SELECT`/`WITH`, no multi-statement/write verbs, forced `LIMIT`, plus `SET TRANSACTION READ ONLY`, `statement_timeout=5s`, and a dedicated read-only DB role. Sources: `cloudwatch_logs`, `cloudwatch_metrics`, `resource_state`, `sql`, `runbook`, `catalog` (+ optional `web`), all cassette-backed in demo mode.
 
-**L5 — Knowledge/RAG.** Runbooks and past postmortems are chunked (markdown, heading breadcrumbs) into `runbook_chunks`: `content` + `tsvector` (FT) + `vector(1024)` (pgvector, HNSW cosine). Hybrid retrieval = full-text + vector, fused with **Reciprocal Rank Fusion**, reranked; every returned chunk becomes a `Citation{chunk_id, source, section, score, excerpt}` attached to recommendations. Runbook chunks are injected **bounded**; when retrieval is weak, the system says so instead of guessing.
+**L5 — Knowledge/RAG.** Runbooks and past postmortems are chunked (markdown, heading breadcrumbs) into `runbook_chunks`: `content` + `tsvector` (FT) + `vector(1024)` (pgvector, HNSW cosine). Hybrid retrieval = full-text + vector, fused with **Reciprocal Rank Fusion**, reranked; every returned chunk becomes a `Citation{chunk_id, source, section, score, excerpt}`. The `retrieve` node runs after `verify`, so only claims that already passed the evidence check earn citations; it queries with words the report itself uses (title, cause token, resource, service) and scopes results to the runbooks `catalog.yaml` binds to that service, falling back to the whole corpus when the scoped search is empty. Two backends share one interface: the **offline corpus index** (default — same chunker, same chunk ids, same embeddings, same RRF, no database) and **pgvector** (`PostgresRunbookIndex`, used by integration tests and available to any caller with the ledger up); a parity test pins them to the same runbook and section for the corpus's signature queries. Citations therefore replace the authored ones in a cassette and are re-derivable with `chunk_id_for`; when retrieval is weak or the corpus is empty, the finding keeps what it had and the gap is visible in the report rather than filled with a guess.
 
 **L6 — Ledger (Postgres).** One canonical store: every investigation, evidence item, tool call, hypothesis, and report section is persisted write-through. `tool_calls` doubles as audit + budget + replay (`query_executed`, `query_hash`). The LangGraph checkpointer persists graph state under `thread_id = investigation_id` → the **restart drill** (interrupt → resume → ledger matches) and the **replay drill** (same cassette twice → identical report, determinism gate).
 

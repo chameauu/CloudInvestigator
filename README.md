@@ -57,10 +57,14 @@ honest about the difference:
   plugs into; none is wired.
 - **One environment.** `catalog.yaml` describes a single development
   environment; Dev/QA separation is not represented.
-- **Runbook retrieval is a tested library, not a pipeline stage.** Hybrid
-  retrieval (pgvector + full-text + RRF) and ingestion work and are covered by
-  tests, but no graph node invokes retrieval; report citations are authored
-  with the scenario.
+- **Retrieval is a pipeline stage; the corpus is real.** After verification,
+  every surviving finding is grounded by a retrieval node (hybrid: the offline
+  corpus index by default, pgvector + full-text + RRF when the database is
+  wired) and the citations it returns replace the ones the cassette script
+  carried. Citations are scoped to the runbooks `catalog.yaml` binds to the
+  affected service, and each `chunk_id` is re-derivable from the chunk on disk.
+  With an empty corpus or no overlap the finding keeps its own citations, and
+  the gap is visible.
 - **Read-only is enforced in the application, not by IAM.** The prefix
   allowlist, the SQL triple guard, `SET TRANSACTION READ ONLY`, and statement
   timeouts are real and tested. A dedicated read-only cloud credential policy
@@ -101,6 +105,9 @@ make reset            # stop and delete local state
   LIMIT), and `SET TRANSACTION READ ONLY` on every live query.
 - **Evidence identity is minted only by tools** — any finding whose citations
   do not resolve to evidence ids in state is demoted, never shown as confirmed.
+- **Runbook citations are re-derivable** — every `chunk_id` in a report is
+  `chunk_id_for(...)` of a real chunk of the corpus, minted by the retrieval
+  stage, not written by hand into a fixture.
 - **Failures are data** — verbatim upstream errors are recorded and surfaced;
   no data is distinct from an error.
 - **Abstention is a correct answer** — insufficient evidence produces an

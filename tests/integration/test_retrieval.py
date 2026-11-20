@@ -103,3 +103,56 @@ def test_rerank_offline_path_keeps_rrf_order(retriever) -> None:
     assert [c.chunk_id for c in scored] == [c.chunk_id for c in chunks]
     # Default top_n is the contract's rerank budget (4): RRF order, truncated.
     assert len(rerank("S3 AccessDenied cause", chunks)) == min(4, len(chunks))
+
+
+#: The offline index and the pgvector index must agree on what grounds a
+#: query: same chunker, same embeddings, same RRF — different execution.
+PARITY_QUERIES = [
+    "S3 AccessDenied cause",
+    "database too many connections",
+    "target group unhealthy 502 503",
+    "container OOM killed exit code 137",
+]
+
+
+@pytest.mark.parametrize("query", PARITY_QUERIES)
+def test_local_index_agrees_with_postgres_on_what_grounds_a_query(retriever, query) -> None:
+    """Same chunker, same embeddings, same RRF — different execution.
+
+    The offline lexical channel is a simplification of plainto_tsquery (no
+    stemming), so the two backends may pick a different chunk *inside* a
+    section the chunker split; they must pick the same runbook and section.
+    """
+    from cloud_investigator.retrieval.index import LocalRunbookIndex
+
+    settings = config.load_settings()
+    local = LocalRunbookIndex(
+        settings.runbook_dir, embedder=FakeEmbedder(dim=settings.embedding_dim)
+    )
+    offline = local.retrieve_citations(query)
+    postgres = retriever.retrieve_citations(query)
+    assert offline and postgres, f"one backend found nothing for {query!r}"
+    assert (offline[0].source, offline[0].section) == (postgres[0].source, postgres[0].section), (
+        f"backends disagree on the grounding for {query!r}: "
+        f"{offline[0].source} § {offline[0].section} vs "
+        f"{postgres[0].source} § {postgres[0].section}"
+    )
+
+
+def test_pipeline_retrieves_through_the_postgres_index(db_up, ingested) -> None:
+    """The graph accepts the pgvector backend — the seam, not just the library."""
+    from cloud_investigator.engine.graph import run_investigation
+    from cloud_investigator.retrieval.index import PostgresRunbookIndex
+
+    conn = db_up()
+    try:
+        report = run_investigation(scenario="s3_access_denied", index=PostgresRunbookIndex(conn))
+    finally:
+        conn.close()
+    assert report.findings, "the scenario must still produce a finding"
+    assert report.citations, "the pgvector backend returned no citations"
+    for finding in report.findings:
+        assert finding.citations
+        for citation in finding.citations:
+            assert citation.source.endswith("s3-access-denied.md")
+            assert citation.chunk_id.startswith("rb:")

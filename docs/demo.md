@@ -55,7 +55,8 @@ Pick one with `make demo SCENARIO=ecs_task_oom`.
    last supporting item lands. Statuses are decided by code, not by the model.
 
 7. **The report.** A typed `InvestigationReport`: hypotheses with their final
-   statuses, findings with evidence ids and a runbook citation, recommendations
+   statuses, findings with evidence ids and the runbook chunks that ground them
+   (retrieved from the corpus at run time, not read from the script), recommendations
    with the culprit version, a rollback path and the steps that prove recovery,
    and a coverage block listing what was queried and what failed.
 

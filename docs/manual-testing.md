@@ -71,9 +71,9 @@ make demo --list              # or: uv run python scripts/demo.py --list
    then `✓ rank 1: all supporting evidence present`.
 7. `[verify]` — one finding, three hypotheses kept.
 8. `REPORT` block — hypotheses (confirmed / refuted / unverified), the finding
-   with its evidence ids and a runbook citation, a recommendation containing
-   `(culprit: v3)`, `Rollback:` and `Verify:`, and coverage (4 calls,
-   1 failure).
+   with its evidence ids and the retrieved runbook chunks that ground it, a
+   recommendation containing `(culprit: v3)`, `Rollback:` and `Verify:`, and
+   coverage (4 calls, 1 failure).
 
 Now run each remaining scenario and compare the report block:
 
@@ -249,7 +249,8 @@ prints the same chunk counts (idempotent upsert).
 make test-integration
 ```
 
-**Expect:** `14 passed` — schema round-trip, retrieval, and the probe
+**Expect:** `20 passed` — schema round-trip, retrieval (including the offline /
+pgvector parity check and a pipeline run through the pgvector index), and the probe
 read-only guarantees, all green.
 
 ```bash

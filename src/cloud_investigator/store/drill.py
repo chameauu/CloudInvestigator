@@ -98,6 +98,10 @@ def run_restart_drill(
             scenario=scenario,
             persist=True,
             checkpointer=checkpointer,
+            # Pin the thread too: the default scenario-level thread would be
+            # shared by every drill of this scenario, and merge_list reducers
+            # would append a second run's probes to the first's checkpoint.
+            thread_id=investigation_id,
             investigation_id=investigation_id,
         )
         counts_a = ledger_counts(investigation_id)

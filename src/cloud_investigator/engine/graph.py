@@ -1,13 +1,15 @@
 """Investigation graph — compiled exactly per the plan pinned in state.py.
 
     START → intake → plan → gate → Send(probe_source × N) → correlate
-          → hypothesize → eliminate → verify → report → END
+          → hypothesize → eliminate → verify → retrieve → report → END
 
 `gate` is the typed `resolve_integrations` stage: the service catalog plus the
 probe registry decide which sources are usable (unavailable ones reported with
 a reason). `hypothesize` runs the diagnose stage (≥2 competing candidates with
 a deterministic fallback); `eliminate` replays evidence arrival and records
-which hypotheses die, so the SSE stream can show it.
+which hypotheses die, so the SSE stream can show it. `retrieve` grounds the
+surviving findings in runbook chunks (RAG) after verification — only claims
+that already passed the evidence check earn citations.
 
 Node rules that keep the Send() fan-out safe (the Executor's predicted risk —
 reducer collisions on parallel branches — is avoided BY CONSTRUCTION here):
@@ -29,6 +31,8 @@ reducer collisions on parallel branches — is avoided BY CONSTRUCTION here):
 
 from __future__ import annotations
 
+import logging
+import re
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
@@ -40,6 +44,7 @@ from langgraph.types import Send
 from ..catalog import Catalog, CatalogError, load_catalog
 from ..config import ConfigError, load_settings
 from ..contracts import (
+    Citation,
     CoverageReport,
     EvidenceItem,
     Finding,
@@ -50,6 +55,7 @@ from ..contracts import (
     TimeRange,
 )
 from ..llm.fake import FakeLLM
+from ..retrieval.index import RunbookIndex, default_runbook_index
 from ..sources.base import ProbeContext
 from ..sources.fake import available_scenarios, load_cassette
 from ..sources.probes import make_probe, registered_probes
@@ -61,6 +67,15 @@ from .routing import resolve_scenario
 from .state import InvestigationState, ProbeBranch
 
 DEFAULT_SCENARIO = "s3_access_denied"
+
+log = logging.getLogger(__name__)
+
+#: Every finding that survived verification is grounded in up to this many
+#: runbook chunks; more would pad the report without adding a next step.
+RETRIEVAL_TOP_N = 2
+_QUERY_MAX_CHARS = 400
+_GROUNDED_SEVERITIES = ("critical", "high", "medium")
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 
 
 class CassetteDiagnoser:
@@ -499,6 +514,75 @@ def verify(state: InvestigationState) -> dict:
     }
 
 
+def _finding_query(finding: Finding, service: str) -> str:
+    """One deterministic retrieval query per finding, built from its own claims.
+
+    Nothing here is model-generated: title, cause token, resource and the
+    finding's detail are the words the report already uses, so a citation can
+    be reproduced from the report alone.
+    """
+    cause = _CAMEL_BOUNDARY.sub(" ", finding.cause_token).strip()
+    resource = finding.resource.display if finding.resource is not None else ""
+    parts = [finding.title, cause, resource, service, finding.detail]
+    return " — ".join(p for p in parts if p)[:_QUERY_MAX_CHARS]
+
+
+def _service_runbooks(service: str, catalog_path: str) -> set[str]:
+    """Runbook file names the catalog binds to this service (empty if none).
+
+    The catalog is the same deterministic map the probes are scoped from, so a
+    citation cannot be grounded in a runbook that does not belong to the
+    service under investigation.
+    """
+    if not service:
+        return set()
+    try:
+        entry = _catalog(catalog_path).services.get(service)
+    except (CatalogError, OSError):
+        return set()
+    if entry is None:
+        return set()
+    return {Path(name).name for name in entry.runbooks}
+
+
+def retrieve_runbooks(state: InvestigationState, index: RunbookIndex | None = None) -> dict:
+    """Ground surviving findings in runbook chunks — the RAG stage.
+
+    Runs after ``verify``, so a claim demoted to a hypothesis never earns a
+    citation. Retrieved citations *replace* the ones the analyser attached:
+    the analyser's are authored, these are re-derivable from the corpus with
+    ``chunk_id_for``. When the catalog binds runbooks to the service, only
+    those are cited (falling back to the whole corpus when the scoped search
+    finds nothing); when retrieval returns nothing at all the finding keeps
+    whatever it came with — a missing runbook is a visible gap, not a reason
+    to strip the analyst's grounding.
+    """
+    resolved = index or default_runbook_index()
+    service = state.get("service", "")
+    settings = load_settings()
+    bound = _service_runbooks(service, settings.catalog_path)
+    findings = list(state.get("findings") or [])
+    updated: list[Finding] = []
+    citations: list[Citation] = []
+    for finding in findings:
+        if finding.severity not in _GROUNDED_SEVERITIES:
+            updated.append(finding)
+            continue
+        hits = resolved.retrieve_citations(_finding_query(finding, service))
+        if bound:
+            scoped = [c for c in hits if Path(c.source).name in bound]
+            if scoped:
+                hits = scoped
+        hits = hits[:RETRIEVAL_TOP_N]
+        if not hits:
+            log.info("no runbook chunk grounded finding %r", finding.title)
+            updated.append(finding)
+            continue
+        updated.append(finding.model_copy(update={"citations": hits}))
+        citations.extend(hits)
+    return {"findings": updated, "citations": citations}
+
+
 def report(state: InvestigationState) -> dict:
     """Render one typed InvestigationReport. Honors abstention + has_findings.
     Lists are re-sorted deterministically so branch-completion order can never
@@ -519,8 +603,9 @@ def report(state: InvestigationState) -> dict:
         key=lambda t: t.ts,
     )
 
-    # Citations: runbook chunks grounding recommendations. Probes may add
-    # some (Step 2 RAG); findings carry theirs either way. Dedupe by identity.
+    # Citations: runbook chunks grounding the findings. The retrieval stage
+    # mints them from the corpus; a finding may still carry its analyst-supplied
+    # citations when retrieval came up empty. Dedupe by identity.
     citations: dict[tuple[str, str], object] = {}
     for c in [
         *(state.get("citations") or []),
@@ -571,15 +656,19 @@ def _recommendations(findings: list[Finding], evidence: list[EvidenceItem]) -> l
 def build_graph(
     checkpointer: BaseCheckpointSaver | None = None,
     interrupt_before: list[str] | None = None,
+    index: RunbookIndex | None = None,
 ):
     """Compile the investigation graph.
 
-    Offline by default: no checkpointer, no interrupts — ``scripts/smoke.py``
-    and the API run fully DB-free. ``checkpointer`` wires LangGraph checkpoint
-    persistence (thread_id = investigation_id, see ``store.checkpointer``);
-    ``interrupt_before`` is the restart-drill seam (stop at a node boundary,
-    resume from the checkpoint with the same thread_id). Node logic, reducers,
-    and the offline default are untouched — this only passes compile options.
+    Offline by default: no checkpointer, no interrupts, and the local runbook
+    index — ``scripts/smoke.py`` and the API run fully DB-free. ``index``
+    injects the retrieval backend (the Postgres one is used by integration
+    tests and any caller with the ledger up); ``checkpointer`` wires LangGraph
+    checkpoint persistence (thread_id = investigation_id, see
+    ``store.checkpointer``); ``interrupt_before`` is the restart-drill seam
+    (stop at a node boundary, resume from the checkpoint with the same
+    thread_id). Node logic, reducers, and the offline default are untouched —
+    this only passes compile options.
     """
     graph = StateGraph(InvestigationState)
     graph.add_node("intake", intake)
@@ -590,6 +679,7 @@ def build_graph(
     graph.add_node("hypothesize", hypothesize)
     graph.add_node("eliminate", eliminate_hypotheses)
     graph.add_node("verify", verify)
+    graph.add_node("retrieve", lambda state: retrieve_runbooks(state, index))
     graph.add_node("report", report)
 
     graph.add_edge(START, "intake")
@@ -600,7 +690,8 @@ def build_graph(
     graph.add_edge("correlate", "hypothesize")
     graph.add_edge("hypothesize", "eliminate")
     graph.add_edge("eliminate", "verify")
-    graph.add_edge("verify", "report")
+    graph.add_edge("verify", "retrieve")
+    graph.add_edge("retrieve", "report")
     graph.add_edge("report", END)
     return graph.compile(checkpointer=checkpointer, interrupt_before=interrupt_before)
 
@@ -647,26 +738,29 @@ def run_investigation(
     interrupt_before: list[str] | None = None,
     resume: bool = False,
     investigation_id: str | None = None,
+    index: RunbookIndex | None = None,
 ) -> InvestigationReport:
     """One offline run; returns the typed report.
 
-    Default: no database at all — no checkpointer, no persistence (smoke path).
-    Every run mints its own investigation id (``inv:{scenario}:{stamp}``) unless
-    ``investigation_id`` pins one — two runs of the same scenario are two
-    ledger rows, never an overwrite. With a checkpointer, ``thread_id`` defaults
-    to the scenario-level thread (``inv:{scenario}``) — thread identity is the
-    checkpoint key, not the report id; ``resume=True`` continues an interrupted
-    thread from its checkpoint. ``persist=True`` write-throughs the finished run
-    to the Postgres ledger (probe results first, then the report). Interrupted
-    legs (no report yet) are driven at the graph level by the restart drill, not
-    here — this function returns a report or raises.
+    Default: no database at all — no checkpointer, no persistence, and the
+    local runbook index (smoke path). Every run mints its own investigation id
+    (``inv:{scenario}:{stamp}``) unless ``investigation_id`` pins one — two
+    runs of the same scenario are two ledger rows, never an overwrite. With a
+    checkpointer, ``thread_id`` defaults to the scenario-level thread
+    (``inv:{scenario}``) — thread identity is the checkpoint key, not the
+    report id; ``resume=True`` continues an interrupted thread from its
+    checkpoint. ``persist=True`` write-throughs the finished run to the
+    Postgres ledger (probe results first, then the report). ``index`` swaps the
+    retrieval backend (Postgres runbook index instead of the local corpus
+    scan). Interrupted legs (no report yet) are driven at the graph level by
+    the restart drill, not here — this function returns a report or raises.
     """
     if resume and checkpointer is None:
         raise ValueError("resuming requires a checkpointer")
-    if checkpointer is None and interrupt_before is None:
+    if checkpointer is None and interrupt_before is None and index is None:
         app = get_graph()
     else:
-        app = build_graph(checkpointer=checkpointer, interrupt_before=interrupt_before)
+        app = build_graph(checkpointer=checkpointer, interrupt_before=interrupt_before, index=index)
     state_in = (
         None
         if resume

@@ -2,7 +2,7 @@
 
 Graph shape (docs/inspiration-and-blueprint.md §4):
   START → intake → plan → gate → Send(probe_source × N) → correlate
-        → hypothesize → eliminate → verify → report → END
+        → hypothesize → eliminate → verify → retrieve → report → END
 
 The probe fan-out follows the LangGraph map-reduce pattern (one branch per
 planned source); joins are implicit via list reducers on the shared state.

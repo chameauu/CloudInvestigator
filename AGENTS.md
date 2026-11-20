@@ -5,7 +5,7 @@
 > `PLAN.md` defines what we are building and in what order. `PROGRESS.md` records where we
 > are. `notes/` holds the evidence. This file defines how we work.
 >
-> **Status:** Phases 0–4 delivered (26 commits); post-audit work in progress — the question resolves to a recording or the run abstains, the deliverable docs state scope and limitations plainly, investigation ids are run-scoped, and the eval now reports two held-out scenarios separately from the six scripted headline rows.
+> **Status:** Phases 0–4 delivered; post-audit work in progress — the question resolves to a recording or the run abstains, the deliverable docs state scope and limitations plainly, investigation ids are run-scoped, the eval reports two held-out scenarios separately from the six scripted headline rows, and runbook retrieval is a pipeline stage (findings cite chunks re-derivable from the corpus, scoped to the service's runbook).
 
 ---
 
@@ -116,12 +116,14 @@ NL problem ──> FastAPI  (POST /api/investigate · GET /api/investigate/{id}/
    intake → plan → gate ──Send()──► probe_source × N   (cassette first, cloud later)
                                     │  cloud probe (CloudWatch Logs)
                                     │  sql probe   (read-only triple-guard)
-                                    │  runbook RAG (hybrid retrieval, citations)
                                     ▼  ProbeResult{evidence[], tool_calls[], …}
               correlate ◄── merge_list reducers ──┘
                   │
                   ▼
-   hypothesize (≥2 competing candidates) → verify (citation-ID check) → report
+   hypothesize (≥2 competing candidates) → verify (citation-ID check)
+                  │
+                  ▼
+   retrieve (runbook RAG: service-scoped chunks → citations)
                   │
                   ▼
         InvestigationReport (typed · cited · abstention-aware)
@@ -171,6 +173,11 @@ avoid fixing the current one.
 - **Report integrity.** The verify step re-checks every cited evidence ID deterministically
   (reject-and-retry once, then demote). A report with no supported findings must abstain
   rather than invent.
+- **Runbook citations.** Chunk ids are `rb:{doc_slug}:{section_slug}:{hash}` minted by
+  retrieval (`chunk_id_for`), never authored in a fixture. The retrieval stage runs after
+  verify, scopes the search to the runbooks the catalog binds to the affected service, and
+  replaces whatever citations the analyst supplied; it falls back to the analyst's only when
+  it finds nothing, so a thin corpus is visible instead of papered over.
 - **Missing or malformed input.** Probe failures are recorded with the verbatim upstream
   error (HolmesGPT rule) and surfaced in the CoverageReport; NO_DATA ≠ ERROR.
 
