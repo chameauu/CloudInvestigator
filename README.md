@@ -25,10 +25,12 @@ make serve        # browser demo: POST /api/investigate + SSE progress
 
 Then open <http://127.0.0.1:8000/>: submit the natural-language problem, watch
 the investigation stream node-by-node, and read the final report. The demo
-replays deterministic cassettes in `fixtures/` — six recorded incidents
-(S3 access denied, refusing database credentials, unhealthy load-balancer
-targets, an OOM-killed task, a log line carrying an injected instruction, and a
-run with no usable data). Pick one with `make demo SCENARIO=ecs_task_oom`.
+replays deterministic cassettes in `fixtures/` — eight recorded incidents: six
+scripted ones (S3 access denied, refusing database credentials, unhealthy
+load-balancer targets, an OOM-killed task, a log line carrying an injected
+instruction, and a run with no usable data) plus two held-out ones used by the
+eval split (RDS connection-pool exhaustion, ALB target-port mismatch). Pick one
+with `make demo SCENARIO=ecs_task_oom`.
 
 Each run resolves the service against `catalog.yaml` to decide which resources
 are in scope and where to look, probes the sources that are actually
@@ -63,17 +65,22 @@ honest about the difference:
   allowlist, the SQL triple guard, `SET TRANSACTION READ ONLY`, and statement
   timeouts are real and tested. A dedicated read-only cloud credential policy
   is required in any live deployment and is not implemented or proven here.
-- **The eval is a conformance test.** Expectations, cassettes, and scripts
-  were authored together, so a 6/6 score proves the harness faithfully replays
-  what it was given. Two rows carry signal independent of the script: the
-  poisoned-evidence row (the citation guard demotes regardless) and the
-  abstention row (a genuine code path).
+- **The eval is a conformance test, plus a small held-out check.** Expectations,
+  cassettes, and scripts for the six headline rows were authored together, so
+  their 6/6 score proves the harness faithfully replays what it was given. Two
+  further incidents were authored from their stories after the scoring rules
+  were frozen; they are replayed and scored but reported separately, excluded
+  from the headline metrics, and a held-out miss still fails the run. Two
+  headline rows carry signal independent of the script: the poisoned-evidence
+  row (the citation guard demotes regardless) and the abstention row (a
+  genuine code path).
 - **No model in the loop.** Diagnosis runs through a cassette diagnoser and a
   deterministic fallback; the `Diagnoser` protocol is where a real model
   attaches, and the fallback is its measurable baseline.
-- **Investigation identity is scenario-derived** (`inv:<scenario>`), so
-  re-running a scenario updates the same ledger row instead of recording a new
-  run.
+- **Investigation identity is run-scoped** (`inv:<scenario>:<utc-stamp>`), so
+  re-running a scenario records a new run with its own ledger rows instead of
+  overwriting the previous audit trail; the checkpoint thread stays
+  scenario-level so a resume continues the interrupted run.
 
 ## Local stack
 
@@ -104,11 +111,17 @@ make reset            # stop and delete local state
 
 ## Evaluated behaviour
 
-`make eval` replays six recorded scenarios — S3 access denied, refusing
-database credentials, unhealthy load-balancer targets, an OOM-killed task, a
-log line carrying an injected instruction, and a run with no usable data — and
-scores each report: correct component, correct fault class, share of claims
-whose evidence ids actually resolve, abstention where evidence is missing, and
-identical output across two replays. Injected claims are checked too: a report
-fails if a term planted in the logs appears in a finding or a confirmed
-hypothesis.
+`make eval` replays eight recorded scenarios and scores each report: correct
+component, correct fault class, share of claims whose evidence ids actually
+resolve, abstention where evidence is missing, and identical output across two
+replays. Injected claims are checked too: a report fails if a term planted in
+the logs appears in a finding or a confirmed hypothesis.
+
+Six are **headline** rows — S3 access denied, refusing database credentials,
+unhealthy load-balancer targets, an OOM-killed task, a log line carrying an
+injected instruction, and a run with no usable data — and their metrics form
+the scoreboard. Two are **held-out** rows — RDS connection-pool exhaustion and
+an ALB target-port mismatch — authored from their incident stories after the
+scoring rules were frozen, never tuned against. They are printed in their own
+table, excluded from the headline percentages, and a held-out failure still
+exits non-zero.

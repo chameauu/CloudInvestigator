@@ -5,7 +5,7 @@
 > `PLAN.md` defines what we are building and in what order. `PROGRESS.md` records where we
 > are. `notes/` holds the evidence. This file defines how we work.
 >
-> **Status:** Phase 4 (demo) — complete: terminal click-through (`make demo`), presenter script and scoreboard in `docs/demo.md`, complete attribution, and a clean-checkout gate verified without cloud credentials or API keys. The project is delivered end-to-end.
+> **Status:** Phases 0–4 delivered (26 commits); post-audit work in progress — the question resolves to a recording or the run abstains, the deliverable docs state scope and limitations plainly, investigation ids are run-scoped, and the eval now reports two held-out scenarios separately from the six scripted headline rows.
 
 ---
 
@@ -154,8 +154,11 @@ avoid fixing the current one.
 
 ## 7. Domain rules
 
-- **Identity.** Evidence IDs are `ev:{investigation}:{source}:{seq}`, minted only by tools
-  inside the probe layer; never by LLM output. Findings carry a stable CamelCase
+- **Identity.** Evidence IDs are `ev:{scenario}:{source}:{seq}`, minted only by tools
+  inside the probe layer; never by LLM output. They are scenario-stable by design (a
+  replay cites the same IDs); the ledger keys them per investigation, and investigation
+  IDs are run-scoped (`inv:{scenario}:{stamp}`) so no run overwrites another's audit
+  trail. Findings carry a stable CamelCase
   `cause_token` for fingerprinting/dedup. ToolCallRecords get one row each in the ledger.
 - **Time.** UTC, ISO-8601, aware datetimes everywhere. Probes require an explicit time
   range with sensible defaults (last 24h); never unbounded windows.

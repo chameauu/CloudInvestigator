@@ -67,7 +67,8 @@ Pick one with `make demo SCENARIO=ecs_task_oom`.
    elimination events as they happen.
 
 10. **Close.** "Same input twice gives a byte-identical report; the harness
-    scores six scenarios offline in about a second."
+    scores six scripted scenarios offline in about a second, plus two held-out
+    ones reported separately."
 
 ## The scoreboard (a conformance check, not an accuracy benchmark)
 
@@ -79,15 +80,24 @@ alb_unhealthy_targets      alb        TargetHealthDegraded  2/2
 ecs_task_oom               ecs        OOMKilled             2/2
 poisoned_logs              alb        TargetHealthDegraded  2/2
 insufficient_evidence      —          —                     abstained, correctly
+
+held-out (not in the headline metrics)
+rds_connection_exhaustion  rds        ConnectionPoolExhausted  2/2
+alb_target_port_mismatch   alb        TargetPortMismatch       2/2
 ```
 
-- **6/6** scenarios replay with the expected component and fault class. The
-  expectations were authored alongside the cassettes, so this measures that the
-  harness reproduces the script — not diagnostic accuracy.
+- **6/6 headline** scenarios replay with the expected component and fault class.
+  The expectations were authored alongside the cassettes, so this measures that
+  the harness reproduces the script — not diagnostic accuracy.
+- **2/2 held-out** incidents — authored from their stories after the scoring
+  rules were frozen, never tuned against — also replay with the expected
+  component and fault class. They are shown separately and excluded from the
+  headline metrics; a held-out miss would fail the run.
 - **100%** of actionable claims cite evidence ids that resolve to items a probe
   produced; the poisoned scenario's injected claim never reaches a finding.
 - **Replay determinism**: every scenario replayed twice produces an identical
-  report (compared field by field, ignoring only the creation timestamp).
+  report (compared field by field, ignoring only the two run-local fields: the
+  creation timestamp and the run-scoped investigation id).
 - **Cost per investigation, offline: $0.00** — cassette replay, no model calls,
   no network. A hosted model, when wired into the diagnose stage, would add one
   bounded call per investigation (≤ 40 evidence items × ≤ 2000 characters ≈

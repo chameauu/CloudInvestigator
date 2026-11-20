@@ -48,7 +48,7 @@ and a `coverage` block listing `sources_planned` and `sources_queried`.
 **Instructions for the mark (assignment demo):** `0` means "not tested",
 `1` means "ran but wrong output", `2` means "ran as described".
 
-## 3. Test B — terminal walkthrough, six incidents
+## 3. Test B — terminal walkthrough, eight incidents
 
 ```bash
 make demo                     # default: s3_access_denied
@@ -83,6 +83,8 @@ Now run each remaining scenario and compare the report block:
 | `make demo SCENARIO=alb_unhealthy_targets` | finding `TargetHealthDegraded`, resource `public-api` |
 | `make demo SCENARIO=ecs_task_oom` | finding `OOMKilled`, resource `batch-worker:42` |
 | `make demo SCENARIO=poisoned_logs` | finding `TargetHealthDegraded`; **no** confirmed claim says `OOMKilled` |
+| `make demo SCENARIO=rds_connection_exhaustion` | finding `ConnectionPoolExhausted`, resource `orders-db` (held-out) |
+| `make demo SCENARIO=alb_target_port_mismatch` | finding `TargetPortMismatch`, resource `public-api` (held-out) |
 | `make demo SCENARIO=insufficient_evidence` | `ABSTAINED — insufficient evidence — no confirmed finding survived verification`, confidence `low` |
 
 **Negative check:**
@@ -91,7 +93,7 @@ Now run each remaining scenario and compare the report block:
 make demo SCENARIO=nope
 ```
 
-**Expect:** `unknown scenario 'nope'`, the list of six available scenarios, and
+**Expect:** `unknown scenario 'nope'`, the list of eight available scenarios, and
 a hint line — no Python traceback. Exit code 1 (`echo $?`).
 
 ## 4. Test C — browser demo
@@ -152,8 +154,9 @@ Stop the server with Ctrl-C when done.
 make eval
 ```
 
-**Expect:** a six-row table, every row `ok` in `comp`, `fault`, `abstain` and
-`replay`, `100.0%` validity, then:
+**Expect:** a six-row headline table, every row `ok` in `comp`, `fault`,
+`abstain` and `replay`, `100.0%` validity; then a separate two-row held-out
+table (also all `ok`), then:
 
 ```
 component accuracy   : 100.0%
@@ -162,15 +165,19 @@ evidence validity    : 100.0%
 abstention rate      : 16.7%
 replay determinism   : identical
 
-EVALS OK — all scenarios scored, deterministic replays, no forbidden claims
+EVALS OK — conformance replay: expected component/fault per scenario, deterministic replays, no forbidden claims; held-out: 2/2
 ```
+
+The headline percentages cover the six scripted scenarios only; the held-out
+rows are printed separately and can fail the run without inflating the
+scoreboard.
 
 Exit code 0.
 
 ## 6. Test E — determinism, by hand
 
-Run the same scenario twice and compare the reports, ignoring only the creation
-timestamp:
+Run the same scenario twice and compare the reports, ignoring only the two
+run-local fields (creation timestamp and run-scoped investigation id):
 
 ```bash
 uv run python - <<'EOF'
@@ -294,7 +301,7 @@ verify` ends with `EVALS OK`, exit code 0; every pre-commit hook passes.
 - [ ] `uv sync` succeeds
 - [ ] `make run` → typed report, confidence high
 - [ ] `make demo` → stages, eliminations, cited report
-- [ ] all six `SCENARIO=` runs match the expected outcome table
+- [ ] all eight `SCENARIO=` runs match the expected outcome table
 - [ ] unknown scenario → clean error, exit 1
 - [ ] `make serve` → page loads, stream fills, report panel shows JSON
 - [ ] `POST /api/investigate` → 200 with report; SSE stream reaches `done`
