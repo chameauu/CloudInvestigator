@@ -33,9 +33,11 @@ top of each file:
 | `src/cloud_investigator/retrieval/context.py` | `src/incident_copilot/rag/context.py` |
 | `src/cloud_investigator/retrieval/__init__.py` | `src/incident_copilot/rag/__init__.py` |
 
-`context.py` is byte-identical to upstream but imports `RetrievedChunk` from
-the adapted `retriever.py` below (the model kept its upstream shape, so no
-edit was needed).
+`context.py` keeps upstream's logic unchanged; the only edits are the
+provenance header every vendored file carries and importing `RetrievedChunk`
+from the adapted `retriever.py` (the model kept its upstream shape, so no code
+change was needed). "Verbatim" below therefore means *no behavioural edit*,
+not byte equality.
 
 ### Reference copy (not executed)
 

@@ -105,16 +105,19 @@ make reset            # stop and delete local state
   LIMIT), and `SET TRANSACTION READ ONLY` on every live query.
 - **Evidence identity is minted only by tools** — any finding whose citations
   do not resolve to evidence ids in state is demoted, never shown as confirmed.
-- **Runbook citations are re-derivable** — every `chunk_id` in a report is
-  `chunk_id_for(...)` of a real chunk of the corpus, minted by the retrieval
-  stage, not written by hand into a fixture.
+- **Runbook citations are re-derivable** — every citation the retrieval stage
+  returns is `chunk_id_for(...)` of a real chunk of the corpus, not written by
+  hand into a fixture. Only when retrieval finds nothing does the finding keep
+  the analyst's own citation, and the report then rests on a corpus that could
+  not ground it.
 - **Failures are data** — verbatim upstream errors are recorded and surfaced;
   no data is distinct from an error.
 - **Abstention is a correct answer** — insufficient evidence produces an
   explicit abstention, not an invented cause.
-- **Investigations are durable** — every run is written to the Postgres ledger
-  and checkpointed, so an interrupted investigation resumes without diverging
-  from an uninterrupted one.
+- **Investigations are durable when the ledger is wired** — with a Postgres
+  checkpointer and `persist=True` (the restart drill, integration tests, any
+  caller that opts in), an interrupted investigation resumes without diverging
+  from an uninterrupted one. Default demo/eval/API runs stay database-free.
 
 ## Evaluated behaviour
 

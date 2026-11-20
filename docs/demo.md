@@ -12,7 +12,9 @@ make demo         # terminal walkthrough, default scenario
 make serve        # optional: browser view on http://127.0.0.1:8000/
 ```
 
-Six recorded incidents are available:
+Six scripted incidents are available (two further held-out recordings,
+`rds_connection_exhaustion` and `alb_target_port_mismatch`, are replayed by
+`make eval` and can be shown the same way with `make demo SCENARIO=…`):
 
 | Scenario | What it is |
 |---|---|
@@ -67,9 +69,9 @@ Pick one with `make demo SCENARIO=ecs_task_oom`.
    submit the question: the same stages stream over SSE, including the
    elimination events as they happen.
 
-10. **Close.** "Same input twice gives a byte-identical report; the harness
-    scores six scripted scenarios offline in about a second, plus two held-out
-    ones reported separately."
+10. **Close.** "Same input twice gives the same report, apart from the run id
+    and the timestamp; the harness scores six scripted scenarios offline in
+    about a second, plus two held-out ones reported separately."
 
 ## The scoreboard (a conformance check, not an accuracy benchmark)
 

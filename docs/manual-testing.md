@@ -51,8 +51,8 @@ and a `coverage` block listing `sources_planned` and `sources_queried`.
 ## 3. Test B — terminal walkthrough, eight incidents
 
 ```bash
-make demo                     # default: s3_access_denied
-make demo --list              # or: uv run python scripts/demo.py --list
+make demo                              # default: s3_access_denied
+uv run python scripts/demo.py --list   # scenarios (`make demo --list` makes make eat the flag)
 ```
 
 **Expect** for the default run, in order:
@@ -192,7 +192,9 @@ EOF
 **Expect:** `identical: True | findings: 1`.
 
 Extra check, if you want it: run `make demo` twice and compare the `REPORT`
-blocks visually — wording, ordering and ids must match exactly.
+blocks visually — wording, ordering and evidence ids must match exactly. The
+`investigation_id` differs by design (run-scoped `inv:<scenario>:<utc-stamp>`);
+`make eval` ignores that field and `created_at` when it asserts determinism.
 
 ## 7. Test F — read-only guarantees, by hand
 
@@ -279,15 +281,16 @@ make verify              # lint + tests + smoke + eval
 uv run pre-commit run --all-files
 ```
 
-**Expect:** all tests pass (291 offline tests at the time of writing); `make
+**Expect:** all tests pass (340 offline tests at the time of writing); `make
 verify` ends with `EVALS OK`, exit code 0; every pre-commit hook passes.
 
 ## 10. Test I — adversarial cases
 
 0. **Unresolvable question abstains** — submit a question with no known
    service vocabulary, e.g. `{"question":"why is checkout slow?"}` with no
-   scenario. Expect an abstaining report whose `abstain_reason` names routing,
-   zero findings, and zero probes: there is no silent default scenario.
+   scenario. Expect an abstaining report whose `abstain_reason` says the question
+   has no known service, resource or fault vocabulary, zero findings, and zero
+   probes: there is no silent default scenario.
 
 | Case | How | Expected |
 |---|---|---|
@@ -324,7 +327,6 @@ verify` ends with `EVALS OK`, exit code 0; every pre-commit hook passes.
 | `make serve` fails: address already in use | port 8000 busy | `uv run uvicorn cloud_investigator.api.main:app --port 8001` |
 | `FileNotFoundError: cassette_…json` on an older build | pre-robustness version | run `git pull`; current code prints available scenarios |
 | `make seed` says 0 chunks | `runbooks/` missing or empty | run from the repository root |
-| Integration tests warn about `datetime.utcnow` | known deprecation in a pinned contract field | warning only; does not affect results |
 | `pre-commit` not found | hooks not installed | `uv run pre-commit install` (or run `uv run pre-commit run --all-files` directly) |
 
 ## 13. Where to look when something fails
