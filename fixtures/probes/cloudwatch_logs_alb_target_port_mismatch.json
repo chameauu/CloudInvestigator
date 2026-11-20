@@ -1,0 +1,19 @@
+{
+  "scenario": "alb_target_port_mismatch",
+  "source": "cloudwatch_logs",
+  "description": "Replay of the public-api log group around the 11:05Z rollout. Both events carry the ERROR term the catalog filter selects: the first is the balancer's refused connection to the old target port, the second is the task-definition port change that caused it.",
+  "log_group": "/aws/ecs/public-api",
+  "filter_pattern": "ERROR",
+  "events": [
+    {
+      "event_id": "cwl-6634478901256",
+      "ts": "2026-11-19T11:05:58.402Z",
+      "message": "2026-11-19T11:05:58.402Z ERROR elbv2 public-api-alb: target 10.0.4.23:8080 connection refused (target-group api-tg, healthy 0/3)"
+    },
+    {
+      "event_id": "cwl-6634478964017",
+      "ts": "2026-11-19T11:06:04.117Z",
+      "message": "2026-11-19T11:06:04.117Z ERROR ecs public-api: task-definition public-api:43 containerPort 8081 (previous 42: 8080)"
+    }
+  ]
+}

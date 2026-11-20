@@ -1,0 +1,99 @@
+{
+  "scenario_id": "rds_connection_exhaustion",
+  "question": "Since 10:30Z the orders API is failing: requests hang then fail with database connection errors. Why?",
+  "time_range": {
+    "start": "2026-11-19T09:00:00Z",
+    "end": "2026-11-19T13:00:00Z",
+    "label": "incident window"
+  },
+  "demo_script": {
+    "service": "rds-orders",
+    "plan": {
+      "sources": ["cloudwatch_logs", "sql"],
+      "rationale": "Connection errors on the orders API with requests hanging first: read the Postgres log group for the server-side FATAL error, then query the authorized orders database read-only to see how many sessions are held and how they are distributed across pg_stat_activity states."
+    },
+    "resources": [
+      {
+        "provider": "aws",
+        "region": "eu-west-1",
+        "service": "rds",
+        "resource_type": "db_instance",
+        "resource_id": "arn:aws:rds:eu-west-1:123456789012:db:orders-db",
+        "name": "orders-db",
+        "tags": { "env": "qa", "owner": "orders-team", "tier": "data" }
+      }
+    ],
+    "hypotheses": [
+      {
+        "rank": 1,
+        "statement": "The orders API client connection pool is exhausted: all 20 pool slots are checked out, 37 requests are waiting to acquire one, and Postgres is at 98 of 100 max_connections with 61 sessions idle in transaction, so requests hang on acquire and then fail with database connection errors.",
+        "status": "confirmed",
+        "arguments_for": [
+          "Postgres reports 98 of 100 max_connections in use: 61 sessions idle in transaction and 37 active",
+          "The application log records acquire timeout after 5000ms with pool_size=20, active=20, waiting=37",
+          "The active session count in pg_stat_activity (37) matches the pool waiters, so the same clients are queued on both sides"
+        ],
+        "arguments_against": [],
+        "evidence_ids": [
+          "ev:rds_connection_exhaustion:cloudwatch_logs:1",
+          "ev:rds_connection_exhaustion:cloudwatch_logs:2",
+          "ev:rds_connection_exhaustion:sql:1",
+          "ev:rds_connection_exhaustion:sql:2",
+          "ev:rds_connection_exhaustion:sql:3"
+        ]
+      },
+      {
+        "rank": 2,
+        "statement": "Upstream latency holding connections open, rather than a client-side pool-size limit.",
+        "status": "refuted",
+        "arguments_for": [
+          "The on-call handover mentions slow checkout responses around the same window"
+        ],
+        "arguments_against": [
+          "pg_stat_activity shows 61 sessions idle in transaction and 37 active with no long-running query; slow upstream calls would leave sessions active and waiting on a query, not idle in transaction",
+          "The application log already reports pool_size=20 with 20 active and 37 waiting, so the bottleneck is the client pool, not upstream latency"
+        ],
+        "evidence_ids": [
+          "ev:rds_connection_exhaustion:sql:1",
+          "ev:rds_connection_exhaustion:cloudwatch_logs:2"
+        ]
+      }
+    ],
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Orders API connection pool exhausted by idle-in-transaction sessions",
+        "detail": "Postgres is at 98 of 100 max_connections: 61 sessions are idle in transaction and 37 are active. The orders API pool is fully checked out (pool_size=20, active=20) with 37 requests waiting, so callers hang for the 5000ms acquire timeout and then fail with database connection errors. The investigator's read-only connection is accepted and pg_stat_activity answers, and no log carries an authentication failure, so the fault is pool saturation holding slots open — not a network path or credential problem.",
+        "resource": {
+          "provider": "aws",
+          "region": "eu-west-1",
+          "service": "rds",
+          "resource_type": "db_instance",
+          "resource_id": "arn:aws:rds:eu-west-1:123456789012:db:orders-db",
+          "name": "orders-db",
+          "tags": { "env": "qa", "owner": "orders-team", "tier": "data" }
+        },
+        "cause_token": "ConnectionPoolExhausted",
+        "confidence": "high",
+        "evidence_ids": [
+          "ev:rds_connection_exhaustion:cloudwatch_logs:1",
+          "ev:rds_connection_exhaustion:cloudwatch_logs:2",
+          "ev:rds_connection_exhaustion:sql:1",
+          "ev:rds_connection_exhaustion:sql:2",
+          "ev:rds_connection_exhaustion:sql:3"
+        ],
+        "recommendation": "Drain the idle-in-transaction sessions that are pinning slots, then right-size the orders-api pool (replicas x pool_max + tooling must stay under max_connections) and put a pooler such as RDS Proxy in front of the instance.",
+        "citations": [
+          {
+            "chunk_id": "rb:rds-connection-exhaustion:rds-connection-exhaustion-too-many-clients:d8a7bdcc",
+            "source": "runbooks/rds-connection-exhaustion.md",
+            "section": "RDS connection exhaustion — too many clients",
+            "score": 0.89,
+            "excerpt": "Sessions holding a transaction open (forgotten COMMIT) pin slots and block vacuum. Signature: `state = 'idle in transaction'` rows with old `state_change` timestamps."
+          }
+        ]
+      }
+    ],
+    "summary": "Root cause confirmed: the orders API pool (pool_size=20) is fully checked out with 37 waiters while Postgres sits at 98/100 connections, 61 of them idle in transaction. Requests hang on pool acquire and fail after the 5000ms timeout. The upstream-latency hypothesis is refuted because the held sessions are idle in transaction, not active on slow queries."
+  }
+}

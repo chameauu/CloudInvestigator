@@ -1,0 +1,19 @@
+{
+  "scenario": "rds_connection_exhaustion",
+  "source": "cloudwatch_logs",
+  "description": "Replay of the orders-db Postgres log group during the connection exhaustion. Both events carry the FATAL term the catalog filter selects: the first is the server refusing a new client at 98/100 connections, the second is the orders API giving up on its own saturated pool and quoting the server error.",
+  "log_group": "/aws/rds/instance/orders-db/postgresql",
+  "filter_pattern": "FATAL",
+  "events": [
+    {
+      "event_id": "cwl-6629014472103",
+      "ts": "2026-11-19T10:31:12.208Z",
+      "message": "2026-11-19T10:31:12.208Z FATAL: sorry, too many clients already (connection count 98/100)"
+    },
+    {
+      "event_id": "cwl-6629014558749",
+      "ts": "2026-11-19T10:33:47.615Z",
+      "message": "2026-11-19T10:33:47.615Z ERROR orders-api: acquire timeout after 5000ms (pool_size=20, active=20, waiting=37) — last server error: FATAL: sorry, too many clients already"
+    }
+  ]
+}

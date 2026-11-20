@@ -38,6 +38,10 @@ COMPETING_BY_CAUSE: dict[str, str] = {
         "Application-level 5xx emitted by healthy targets, rather than a "
         "health-check configuration fault"
     ),
+    "TargetPortMismatch": (
+        "The new tasks fail to start, so the target group has no backend, "
+        "rather than a port the balancer cannot reach"
+    ),
     "OOMKilled": ("A one-off load spike or memory leak, rather than an undersized memory limit"),
     "Throttling": (
         "A retry storm amplifying one slow dependency, rather than an account-level quota"

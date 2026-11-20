@@ -40,6 +40,29 @@ def test_alb_question_resolves_on_target_health_vocabulary():
     assert match.scenario == "alb_unhealthy_targets"
 
 
+def test_rds_connection_exhaustion_question_resolves_to_its_own_scenario():
+    match = resolve_scenario(
+        "Since 10:30Z the orders API is failing: requests hang then fail with "
+        "database connection errors. Why?",
+        CASSETTES,
+    )
+    assert match.scenario == "rds_connection_exhaustion"
+    assert match.score >= MIN_SCORE
+    assert match.score > match.runner_up
+    assert "connection" in match.matched_terms
+
+
+def test_alb_target_port_mismatch_question_resolves_to_its_own_scenario():
+    match = resolve_scenario(
+        "After the 11:05Z rollout the public API returns 502/503 for every request. What broke?",
+        CASSETTES,
+    )
+    assert match.scenario == "alb_target_port_mismatch"
+    assert match.score >= MIN_SCORE
+    assert match.score > match.runner_up
+    assert "rollout" in match.matched_terms
+
+
 def test_unrelated_question_is_unresolved_not_defaulted():
     match = resolve_scenario(
         "My Kubernetes ingress in production is returning 502s and the database is on fire.",

@@ -1,0 +1,102 @@
+{
+  "scenario_id": "alb_target_port_mismatch",
+  "question": "After the 11:05Z rollout the public API returns 502/503 for every request. What broke?",
+  "time_range": {
+    "start": "2026-11-19T10:30:00Z",
+    "end": "2026-11-19T14:30:00Z",
+    "label": "incident window"
+  },
+  "demo_script": {
+    "service": "public-api",
+    "plan": {
+      "sources": ["cloudwatch_logs"],
+      "rationale": "Every request is answered with 502/503 right after the 11:05Z rollout on the public API: read the ECS service log group for the ALB target error and the task-definition change. The catalog lists no authorized database for this service, so logs are the only useful source."
+    },
+    "resources": [
+      {
+        "provider": "aws",
+        "region": "eu-west-1",
+        "service": "alb",
+        "resource_type": "load_balancer",
+        "resource_id": "arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/app/public-api/abc123",
+        "name": "public-api",
+        "tags": { "env": "qa", "owner": "platform", "tier": "edge" }
+      },
+      {
+        "provider": "aws",
+        "region": "eu-west-1",
+        "service": "ecs",
+        "resource_type": "service",
+        "resource_id": "arn:aws:ecs:eu-west-1:123456789012:service/public-api/api",
+        "name": "api",
+        "tags": { "env": "qa", "owner": "platform" }
+      }
+    ],
+    "hypotheses": [
+      {
+        "rank": 1,
+        "statement": "The 11:05Z rollout registered task definition revision public-api:43 with containerPort 8081, but target group api-tg still forwards to port 8080, so the public API answers 502/503 for every request because the balancer's connection to the targets is refused.",
+        "status": "confirmed",
+        "arguments_for": [
+          "The ALB log records target 10.0.4.23:8080 connection refused with healthy 0/3 in target group api-tg",
+          "The ECS log records task-definition public-api:43 containerPort 8081 (previous revision 42: 8080) applied at the start of the rollout",
+          "The service reports its tasks RUNNING, so the targets exist and listen on the new port rather than failing to start"
+        ],
+        "arguments_against": [],
+        "evidence_ids": [
+          "ev:alb_target_port_mismatch:cloudwatch_logs:1",
+          "ev:alb_target_port_mismatch:cloudwatch_logs:2"
+        ]
+      },
+      {
+        "rank": 2,
+        "statement": "The new tasks crash during startup after the rollout, so the target group has no live backend left to serve requests.",
+        "status": "refuted",
+        "arguments_for": [
+          "Every request returns 502/503 immediately after the rollout"
+        ],
+        "arguments_against": [
+          "The tasks are RUNNING and the ALB log shows a refused TCP connection to 10.0.4.23:8080, which means a live target was reached on a port it no longer listens on",
+          "The ECS log states the containerPort change explicitly (8081, previously 8080), so the failure is a port mismatch rather than a missing backend"
+        ],
+        "evidence_ids": [
+          "ev:alb_target_port_mismatch:cloudwatch_logs:1",
+          "ev:alb_target_port_mismatch:cloudwatch_logs:2"
+        ]
+      }
+    ],
+    "findings": [
+      {
+        "severity": "high",
+        "title": "ALB target group forwards to port 8080 while revision 43 listens on 8081",
+        "detail": "Task definition revision public-api:43 moved the container port from 8080 to 8081 during the 11:05Z rollout, but target group api-tg still forwards to port 8080. The balancer gets connection refused from the new tasks (healthy 0/3) and answers 502/503 for every request. The tasks are RUNNING and the port change is explicit in the ECS log, so the requests reach a live task on the wrong port — this is a listener/target-port mismatch, not an application crash and not a missing backend.",
+        "resource": {
+          "provider": "aws",
+          "region": "eu-west-1",
+          "service": "alb",
+          "resource_type": "load_balancer",
+          "resource_id": "arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/app/public-api/abc123",
+          "name": "public-api",
+          "tags": { "env": "qa", "owner": "platform", "tier": "edge" }
+        },
+        "cause_token": "TargetPortMismatch",
+        "confidence": "high",
+        "evidence_ids": [
+          "ev:alb_target_port_mismatch:cloudwatch_logs:1",
+          "ev:alb_target_port_mismatch:cloudwatch_logs:2"
+        ],
+        "recommendation": "Roll the api service back to revision 42 (containerPort 8080) or update target group api-tg to forward to port 8081, then confirm 3/3 targets report healthy and the 502/503 rate returns to baseline.",
+        "citations": [
+          {
+            "chunk_id": "rb:alb-5xx-target-health:alb-5xx-target-health-diagnosis:f113835a",
+            "source": "runbooks/alb-5xx-target-health.md",
+            "section": "ALB 5xx — target health diagnosis",
+            "score": 0.86,
+            "excerpt": "The ALB is a messenger: a 502 means the target answered badly or died mid-response, a 503 means no healthy target could take the request, a 504 means the target never answered in time."
+          }
+        ]
+      }
+    ],
+    "summary": "Root cause confirmed: revision 43 of the api task definition moved the container port to 8081 while target group api-tg still forwards to 8080, so the balancer's connections are refused and clients see 502/503 for every request. The application-crash hypothesis is refuted because the tasks are RUNNING and the port change is explicit in the ECS log."
+  }
+}
